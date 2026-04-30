@@ -1,0 +1,53 @@
+# ============================================================
+# Pearls AQI Predictor — Requirements
+# ============================================================
+
+# Core Data Science
+pandas==2.2.2
+numpy==1.26.4
+scipy==1.13.0
+
+# Machine Learning
+scikit-learn==1.5.0
+xgboost==2.0.3
+joblib==1.4.2
+
+# Deep Learning (optional — comment out if not needed)
+tensorflow==2.16.1
+
+# Explainability
+shap==0.45.1
+
+# API & Web
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+httpx==0.27.0
+requests==2.32.2
+pydantic==2.7.1
+
+# Frontend
+streamlit==1.35.0
+plotly==5.22.0
+altair==5.3.0
+
+# Utilities
+python-dotenv==1.0.1
+pyyaml==6.0.1
+tqdm==4.66.4
+cachetools==5.3.3
+
+# Feature Store + Model Registry
+hopsworks>=4.0.0
+
+
+# Dev / Testing
+pytest==8.2.2
+pytest-asyncio==0.23.7
+black==24.4.2
+flake8==7.0.0
+
+# Jupyter (for notebooks)
+jupyterlab==4.2.1
+ipykernel==6.29.4
+matplotlib==3.9.0
+seaborn==0.13.2
