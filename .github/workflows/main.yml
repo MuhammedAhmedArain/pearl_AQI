@@ -80,7 +80,7 @@ jobs:
           OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
           HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
           HOPSWORKS_PROJECT: pearlsAQI
-          HOPSWORKS_HOST: c.app.hopsworks.ai
+          HOPSWORKS_HOST: eu-west.cloud.hopsworks.ai
         run: |
           for city in "Sukkur"; do
             echo "Processing features for $city ..."
@@ -117,7 +117,7 @@ jobs:
           OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
           HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
           HOPSWORKS_PROJECT: pearlsAQI
-          HOPSWORKS_HOST: c.app.hopsworks.ai
+          HOPSWORKS_HOST: eu-west.cloud.hopsworks.ai
         run: |
           # No-tune for CI speed; model registry handles versioning
           python src/train.py --no-tune
@@ -168,5 +168,5 @@ jobs:
         env:
           HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
           HOPSWORKS_PROJECT: pearlsAQI
-          HOPSWORKS_HOST: c.app.hopsworks.ai
+          HOPSWORKS_HOST: eu-west.cloud.hopsworks.ai
         run: python src/backfill.py --days 90
