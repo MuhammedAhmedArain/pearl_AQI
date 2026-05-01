@@ -99,6 +99,10 @@ def clean_data(df: pd.DataFrame) -> pd.DataFrame:
     df = df.drop_duplicates(subset=["timestamp", "city"] if "city" in df.columns else ["timestamp"])
     df = df.sort_values("timestamp").reset_index(drop=True)
 
+    # Filter to only supported cities
+    if "city" in df.columns:
+        df = df[df["city"].isin(config.SUPPORTED_CITIES)]
+
     # Drop rows without target
     df = df.dropna(subset=[config.TARGET_COLUMN])
 
