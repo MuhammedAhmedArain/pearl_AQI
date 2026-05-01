@@ -3,17 +3,17 @@
 # ============================================================
 
 # Core Data Science
-pandas==2.2.2
-numpy==1.26.4
-scipy==1.13.0
+pandas>=2.0.0
+numpy>=1.24.0
+scipy>=1.10.0
 
 # Machine Learning
-scikit-learn==1.5.0
-xgboost==2.0.3
-joblib==1.4.2
+scikit-learn>=1.3.0
+xgboost>=2.0.0
+joblib>=1.3.0
 
 # Deep Learning (optional — comment out if not needed)
-tensorflow==2.16.1
+# tensorflow==2.16.1
 
 # Explainability
 shap==0.45.1
