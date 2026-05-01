@@ -468,11 +468,11 @@ with col_shap:
 st.divider()
 
 # ── Row 4: Model Info ─────────────────────────────────────────
-st.markdown("### 🤖 Model Information")
+st.markdown("### 🤖 Deployed Model Details")
 col_m1, col_m2, col_m3, col_m4 = st.columns(4)
 metrics = data.get("model_metrics", {})
 model_cards = [
-    ("Model", data.get("model_name", "N/A"), "🏆"),
+    ("Currently Active", data.get("model_name", "N/A"), "🏆"),
     ("MAE",   f"{metrics.get('mae', 'N/A')}",  "📉"),
     ("RMSE",  f"{metrics.get('rmse', 'N/A')}", "📊"),
     ("R²",    f"{metrics.get('r2', 'N/A')}",   "🎯"),
@@ -487,6 +487,34 @@ for col, (label, val, icon) in zip([col_m1, col_m2, col_m3, col_m4], model_cards
             f'</div>',
             unsafe_allow_html=True,
         )
+
+st.markdown("<br>", unsafe_allow_html=True)
+st.markdown("### 🥇 Training Leaderboard (All Evaluated Models)")
+st.caption("During the last daily training run, the pipeline automatically tested the following models. The model with the lowest RMSE was automatically deployed.")
+
+try:
+    import pandas as pd
+    comp_df = pd.read_csv("models/model_comparison.csv")
+    
+    # Highlight the deployed model
+    deployed_name = data.get("model_name", "")
+    
+    def highlight_deployed(row):
+        if row['model_name'] == deployed_name:
+            return ['background-color: rgba(102, 126, 234, 0.3)'] * len(row)
+        return [''] * len(row)
+        
+    st.dataframe(
+        comp_df.style.apply(highlight_deployed, axis=1).format({
+            "rmse": "{:.4f}",
+            "mae": "{:.4f}",
+            "r2": "{:.4f}"
+        }),
+        use_container_width=True,
+        hide_index=True
+    )
+except Exception as e:
+    st.info("Leaderboard data not currently available.")
 
 # ── Footer ────────────────────────────────────────────────────
 st.markdown("<br>", unsafe_allow_html=True)
