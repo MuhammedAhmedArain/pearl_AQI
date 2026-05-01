@@ -59,10 +59,7 @@ def generate_historical_data(
 
     # City-specific AQI baseline (higher for more polluted cities)
     city_baselines = {
-        "Karachi":   130, "Lahore":    150, "Delhi":      160,
-        "Beijing":   140, "Istanbul":  110, "Dubai":       80,
-        "London":     60, "New York":   70, "Tokyo":       55,
-        "Islamabad": 100,
+        "Sukkur": 140,
     }
     base_aqi = city_baselines.get(city, 100)
 
