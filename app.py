@@ -1,5 +1,5 @@
 """
-app.py — Streamlit Dashboard for Pearls AQI Predictor
+app.py — Premium Dashboard for Pearls AQI Predictor
 """
 
 import sys
@@ -8,7 +8,6 @@ import requests
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-import plotly.express as px
 import streamlit as st
 from pathlib import Path
 
@@ -17,94 +16,130 @@ import config
 
 # ── Page Config ──────────────────────────────────────────────
 st.set_page_config(
-    page_title="Pearls AQI Predictor",
-    page_icon="🌬️",
+    page_title="AQI Forecast Dashboard",
+    page_icon="🌍",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 # ── Custom CSS ───────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
 
-html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+html, body, [class*="css"] { font-family: 'Outfit', sans-serif !important; }
 
-.main { background: linear-gradient(135deg, #0f0c29, #302b63, #24243e); min-height: 100vh; }
-
-.metric-card {
-    background: rgba(255,255,255,0.05);
-    backdrop-filter: blur(12px);
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 16px;
-    padding: 20px;
-    text-align: center;
-    transition: transform 0.2s;
+.stApp {
+    background-color: #1e293b;
+    color: #f8fafc;
 }
-.metric-card:hover { transform: translateY(-4px); }
-
-.aqi-badge {
-    display: inline-block;
-    padding: 8px 24px;
-    border-radius: 50px;
-    font-size: 1.4rem;
-    font-weight: 700;
-    letter-spacing: 1px;
-    margin: 8px 0;
-}
-
-.alert-box {
-    background: linear-gradient(135deg, #ff416c, #ff4b2b);
-    border-radius: 12px;
-    padding: 16px 24px;
-    color: white;
-    font-weight: 600;
-    font-size: 1.1rem;
-    animation: pulse 2s infinite;
-}
-
-@keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50%       { opacity: 0.7; }
-}
-
-.forecast-card {
-    background: rgba(255,255,255,0.07);
-    border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 14px;
-    padding: 18px;
-    text-align: center;
-}
-
-.shap-bar {
-    height: 18px;
-    border-radius: 9px;
-    background: linear-gradient(90deg, #667eea, #764ba2);
-    margin: 4px 0;
-}
-
-h1, h2, h3 { color: #fff !important; }
-.stSelectbox label { color: #ccc !important; }
 
 /* Hide Streamlit Default Header/Footer/Deploy Button */
 #MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
 header {visibility: hidden;}
+div[data-testid="stToolbar"] {visibility: hidden;}
+
+/* Custom Gradients and Typography */
+.title-text {
+    font-size: 3.5rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, #38bdf8, #818cf8, #c084fc);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 4px;
+    line-height: 1.2;
+}
+
+.subtitle-text {
+    color: #94a3b8;
+    font-size: 1.15rem;
+    font-weight: 400;
+    margin-top: 0px;
+    margin-bottom: 30px;
+    letter-spacing: 0.5px;
+}
+
+/* AQI Cards */
+.aqi-card {
+    border-radius: 24px;
+    padding: 28px 20px;
+    box-shadow: 0 10px 30px -5px rgba(0,0,0,0.5);
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    border: 1px solid rgba(255,255,255,0.08);
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+}
+
+.aqi-card:hover {
+    transform: translateY(-8px);
+    box-shadow: 0 20px 40px -10px rgba(0,0,0,0.6);
+    border: 1px solid rgba(255,255,255,0.2);
+}
+
+.bg-good { background: linear-gradient(135deg, #059669 0%, #10b981 100%); }
+.bg-moderate { background: linear-gradient(135deg, #d97706 0%, #fbbf24 100%); }
+.bg-sensitive { background: linear-gradient(135deg, #ea580c 0%, #f97316 100%); }
+.bg-unhealthy { background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%); }
+.bg-very { background: linear-gradient(135deg, #7c3aed 0%, #8b5cf6 100%); }
+.bg-haz { background: linear-gradient(135deg, #9f1239 0%, #e11d48 100%); }
+
+.card-title { font-size: 1.1rem; font-weight: 700; opacity: 0.95; text-transform: uppercase; letter-spacing: 1.5px; }
+.card-value { font-size: 4.5rem; font-weight: 800; line-height: 1.1; margin: 12px 0; text-shadow: 0 4px 10px rgba(0,0,0,0.2); }
+.card-subtitle { font-size: 1.2rem; font-weight: 600; opacity: 0.95; margin-bottom: 4px; }
+.card-details { font-size: 0.9rem; opacity: 0.8; }
+
+/* Alert Boxes */
+.alert-danger {
+    background: linear-gradient(135deg, #7f1d1d, #9f1239);
+    border-radius: 16px; padding: 20px; color: white; font-weight: 600;
+    box-shadow: 0 4px 20px rgba(159, 18, 57, 0.4);
+    animation: pulse 2s infinite; border-left: 8px solid #f43f5e;
+    font-size: 1.1rem;
+}
+.alert-warning {
+    background: linear-gradient(135deg, #9a3412, #c2410c);
+    border-radius: 16px; padding: 20px; color: white; font-weight: 600;
+    box-shadow: 0 4px 20px rgba(194, 65, 12, 0.4); 
+    border-left: 8px solid #f97316; font-size: 1.1rem;
+}
+
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.8; } }
+
+/* Glass Model Card */
+.glass-card {
+    background: rgba(30, 41, 59, 0.6);
+    backdrop-filter: blur(12px);
+    border-radius: 20px;
+    padding: 24px;
+    border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+}
+
+.model-tag {
+    display: inline-block; background: rgba(56, 189, 248, 0.15);
+    color: #38bdf8; padding: 6px 16px; border-radius: 30px; 
+    font-weight: 700; font-size: 0.95rem; border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+/* Base Streamlit overrides */
+.stSelectbox > div > div { background-color: rgba(30, 41, 59, 0.8) !important; border-radius: 12px; color: white; }
+.stButton > button { border-radius: 12px !important; height: 46px; font-weight: 600; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── API Helper ───────────────────────────────────────────────
+# ── API & Data Helpers ─────────────────────────────────────────
+
 API_BASE = f"http://localhost:{config.API_PORT}"
 
 @st.cache_data(ttl=config.CACHE_TTL_SECONDS)
 def get_prediction(city: str, shap: bool = True) -> dict | None:
-    """Call the FastAPI backend or fall back to direct prediction."""
     try:
         resp = requests.get(f"{API_BASE}/predict", params={"city": city, "shap": shap}, timeout=60)
         resp.raise_for_status()
         return resp.json()
     except Exception:
-        # Direct fallback (no API running)
         try:
             from src.fetch_data import fetch_city_data
             from src.predict import predict_next_days
@@ -123,411 +158,213 @@ def get_historical_data(city: str) -> pd.DataFrame:
     except Exception:
         return pd.DataFrame()
 
-def get_aqi_color(aqi: float) -> str:
-    cat = config.get_aqi_category(aqi)
-    return cat["color"]
+def get_aqi_category_class(aqi: float) -> str:
+    if aqi <= 50: return "bg-good"
+    elif aqi <= 100: return "bg-moderate"
+    elif aqi <= 150: return "bg-sensitive"
+    elif aqi <= 200: return "bg-unhealthy"
+    elif aqi <= 300: return "bg-very"
+    else: return "bg-haz"
 
-def aqi_gauge(aqi: float, title: str = "Current AQI") -> go.Figure:
-    color = get_aqi_color(aqi)
-    fig = go.Figure(go.Indicator(
-        mode="gauge+number+delta",
-        value=aqi,
-        title={"text": title, "font": {"size": 18, "color": "white"}},
-        number={"font": {"color": color, "size": 48}},
-        gauge={
-            "axis": {"range": [0, 500], "tickcolor": "white",
-                     "tickfont": {"color": "white"}},
-            "bar":  {"color": color, "thickness": 0.3},
-            "bgcolor": "rgba(0,0,0,0)",
-            "borderwidth": 0,
-            "steps": [
-                {"range": [0,   50],  "color": "rgba(0,228,0,0.2)"},
-                {"range": [51,  100], "color": "rgba(255,255,0,0.2)"},
-                {"range": [101, 150], "color": "rgba(255,126,0,0.2)"},
-                {"range": [151, 200], "color": "rgba(255,0,0,0.2)"},
-                {"range": [201, 300], "color": "rgba(143,63,151,0.2)"},
-                {"range": [301, 500], "color": "rgba(126,0,35,0.2)"},
-            ],
-            "threshold": {"line": {"color": "white", "width": 3}, "value": aqi},
-        },
-    ))
-    fig.update_layout(
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        font_color="white",
-        margin=dict(t=40, b=10, l=20, r=20),
-        height=260,
-    )
-    return fig
+# ── Plotly Charts ──────────────────────────────────────────────
 
-def forecast_chart(daily_preds: list[dict]) -> go.Figure:
-    dates = [d["date"] for d in daily_preds]
-    means = [d["aqi_mean"] for d in daily_preds]
-    maxes = [d["aqi_max"]  for d in daily_preds]
-    mins  = [d["aqi_min"]  for d in daily_preds]
-    colors= [d["color"]    for d in daily_preds]
-
+def combined_trend_chart(hist_df: pd.DataFrame, daily_preds: list[dict], current_aqi: float) -> go.Figure:
     fig = go.Figure()
+    
+    # 1. Historical Data
+    if not hist_df.empty and "timestamp" in hist_df.columns:
+        df = hist_df.tail(48) # last 48 hours for better visual scale
+        fig.add_trace(go.Scatter(
+            x=pd.to_datetime(df["timestamp"]), y=df["aqi"],
+            mode="lines",
+            line=dict(color="#94a3b8", width=2, shape="spline"),
+            name="Historical AQI",
+            fill="tozeroy",
+            fillcolor="rgba(148, 163, 184, 0.08)",
+            hovertemplate="<b>Date</b>: %{x}<br><b>AQI</b>: %{y:.0f}<extra></extra>"
+        ))
+        last_date = pd.to_datetime(df["timestamp"]).iloc[-1]
+    else:
+        last_date = pd.Timestamp.now()
+        
+    # 2. Predicted Data
+    pred_dates = [last_date] + [pd.to_datetime(d["date"]) for d in daily_preds]
+    pred_vals = [current_aqi] + [d["aqi_mean"] for d in daily_preds]
+    
     fig.add_trace(go.Scatter(
-        x=dates + dates[::-1],
-        y=maxes + mins[::-1],
-        fill="toself",
-        fillcolor="rgba(102,126,234,0.15)",
-        line=dict(color="rgba(0,0,0,0)"),
-        name="Min–Max Range",
+        x=pred_dates, y=pred_vals,
+        mode="lines+markers",
+        line=dict(color="#38bdf8", width=4, shape="spline", dash="dot"),
+        marker=dict(size=12, color="#818cf8", line=dict(color="#0f172a", width=3)),
+        name="Predicted Average",
+        hovertemplate="<b>Date</b>: %{x|%b %d}<br><b>Predicted AQI</b>: %{y:.0f}<extra></extra>"
     ))
-    fig.add_trace(go.Scatter(
-        x=dates, y=means,
-        mode="lines+markers+text",
-        text=[f"{v:.0f}" for v in means],
-        textposition="top center",
-        textfont=dict(color="white", size=14),
-        line=dict(color="#667eea", width=3),
-        marker=dict(size=12, color=colors, line=dict(color="white", width=2)),
-        name="Daily Mean AQI",
-    ))
-    fig.add_hline(y=150, line_dash="dash", line_color="#ff4b2b",
-                  annotation_text="⚠️ Unhealthy", annotation_font_color="#ff4b2b")
+    
+    # Thresholds
+    fig.add_hline(y=150, line_dash="dash", line_color="#f97316", opacity=0.4, annotation_text="Unhealthy (Sensitive)", annotation_font_color="#f97316")
+    fig.add_hline(y=200, line_dash="dash", line_color="#ef4444", opacity=0.4, annotation_text="Unhealthy", annotation_font_color="#ef4444")
+    
     fig.update_layout(
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        font_color="white",
-        xaxis=dict(showgrid=False, color="white"),
-        yaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.1)",
-                   color="white", range=[0, max(maxes)*1.2]),
-        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="white")),
-        margin=dict(t=20, b=30, l=40, r=20),
-        height=300,
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font_color="#cbd5e1",
+        xaxis=dict(showgrid=False, title="", tickfont=dict(size=11)),
+        yaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.06)", title="AQI Level"),
+        margin=dict(t=20, b=20, l=40, r=20), height=380,
+        hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="right", x=1)
     )
     return fig
 
-def pollutant_radar(pollutants: dict) -> go.Figure:
-    cats   = list(pollutants.keys())
-    values = [round(v, 1) for v in pollutants.values()]
-    fig = go.Figure(go.Scatterpolar(
-        r=values + [values[0]],
-        theta=cats + [cats[0]],
-        fill="toself",
-        fillcolor="rgba(102,126,234,0.3)",
-        line=dict(color="#667eea", width=2),
-        marker=dict(size=8, color="#764ba2"),
-    ))
-    fig.update_layout(
-        polar=dict(
-            bgcolor="rgba(0,0,0,0)",
-            radialaxis=dict(visible=True, color="rgba(255,255,255,0.4)"),
-            angularaxis=dict(color="white"),
-        ),
-        paper_bgcolor="rgba(0,0,0,0)",
-        font_color="white",
-        margin=dict(t=30, b=30, l=30, r=30),
-        height=280,
-        showlegend=False,
-    )
-    return fig
-
-def historical_chart(hist_df: pd.DataFrame) -> go.Figure:
-    if hist_df.empty:
-        return go.Figure()
-    df = hist_df.tail(168)  # Last 7 days (hourly)
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=df["timestamp"], y=df["aqi"],
-        mode="lines",
-        line=dict(color="#667eea", width=1.5),
-        fill="tozeroy",
-        fillcolor="rgba(102,126,234,0.15)",
-        name="AQI",
-    ))
-    for threshold, label, color in [(50,"Good","#00e400"),(100,"Moderate","#ffff00"),(150,"Sensitive","#ff7e00")]:
-        fig.add_hline(y=threshold, line_dash="dot", line_color=color,
-                      annotation_text=label, annotation_font_color=color)
-    fig.update_layout(
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        font_color="white",
-        xaxis=dict(showgrid=False, color="white"),
-        yaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.1)", color="white"),
-        margin=dict(t=10, b=30, l=40, r=20),
-        height=250,
-        showlegend=False,
-    )
-    return fig
-
-def shap_chart(top_features: list[dict]) -> go.Figure:
-    if not top_features:
-        return go.Figure()
-    feats = [f["feature"] for f in top_features[:10]][::-1]
-    vals  = [f["importance"] for f in top_features[:10]][::-1]
+def modern_shap_chart(top_features: list[dict]) -> go.Figure:
+    if not top_features: return go.Figure()
+    feats = [f["feature"].replace("_", " ").title() for f in top_features[:7]][::-1]
+    vals  = [f["importance"] for f in top_features[:7]][::-1]
+    
     fig = go.Figure(go.Bar(
-        x=vals, y=feats,
-        orientation="h",
+        x=vals, y=feats, orientation="h",
         marker=dict(
             color=vals,
-            colorscale="Viridis",
-            showscale=False,
+            colorscale="Purp",
+            line=dict(color="rgba(0,0,0,0)", width=0)
         ),
+        hovertemplate="<b>%{y}</b><br>Impact: %{x:.4f}<extra></extra>"
     ))
     fig.update_layout(
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        font_color="white",
-        xaxis=dict(title="Mean |SHAP|", color="white", showgrid=True,
-                   gridcolor="rgba(255,255,255,0.1)"),
-        yaxis=dict(color="white"),
-        margin=dict(t=10, b=30, l=10, r=20),
-        height=300,
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font_color="#cbd5e1",
+        xaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.06)", title="Impact on Prediction"),
+        yaxis=dict(showgrid=False, tickfont=dict(size=12, color="#e2e8f0")),
+        margin=dict(t=10, b=30, l=10, r=20), height=380,
     )
     return fig
 
+# ── UI Layout Assembly ─────────────────────────────────────────
 
-# ══════════════════════════════════════════════════════════════
-# LAYOUT
-# ══════════════════════════════════════════════════════════════
+# Header Title
+st.markdown("<div class='title-text'>🌍 AQI Forecast Dashboard</div>", unsafe_allow_html=True)
+st.markdown("<div class='subtitle-text'>Real-time Air Quality Monitoring & 3-Day Prediction Powered by Machine Learning</div>", unsafe_allow_html=True)
 
-# ── Header ───────────────────────────────────────────────────
-st.markdown("""
-<div style="text-align:center; padding: 24px 0 8px 0;">
-  <h1 style="font-size:2.8rem; font-weight:900; 
-     background: linear-gradient(135deg, #667eea, #764ba2, #f093fb);
-     -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-     margin-bottom:4px;">
-    🌬️ Pearls AQI Predictor
-  </h1>
-  <p style="color:#aaa; font-size:1.05rem;">
-    Real-time Air Quality Index forecasting powered by Machine Learning
-  </p>
-</div>
-""", unsafe_allow_html=True)
-
-st.divider()
-
-# ── Sidebar ───────────────────────────────────────────────────
-with st.sidebar:
-    st.markdown("### ⚙️ Settings")
-
-    city = st.selectbox(
-        "📍 Select City",
-        options=config.SUPPORTED_CITIES,
-        index=0,
-        key="city_selector",
-    )
-
-
-
-    st.markdown("---")
-    include_shap = st.toggle("🔍 Show SHAP Explainability", value=True)
-    auto_refresh  = st.toggle("🔄 Auto Refresh (5 min)", value=False)
-
-    st.markdown("---")
-
-    if st.button("🚀 Get Prediction", type="primary", use_container_width=True):
+# Controls
+col_city, col_btn, col_space = st.columns([2, 1, 6])
+with col_city:
+    city = st.selectbox("Location", options=config.SUPPORTED_CITIES, label_visibility="collapsed")
+with col_btn:
+    if st.button("🔄 Refresh Data", use_container_width=True):
         st.cache_data.clear()
 
-    st.markdown("---")
-    st.markdown("### 📊 AQI Scale")
-    aqi_levels = [
-        ("😊 Good",              "0–50",   "#00e400"),
-        ("😐 Moderate",          "51–100",  "#ffff00"),
-        ("😷 Unhealthy (Sens.)", "101–150", "#ff7e00"),
-        ("🤢 Unhealthy",         "151–200", "#ff0000"),
-        ("🚨 Very Unhealthy",    "201–300", "#8f3f97"),
-        ("☠️ Hazardous",         "301–500", "#7e0023"),
-    ]
-    for label, rng, color in aqi_levels:
-        st.markdown(
-            f'<div style="display:flex;align-items:center;gap:8px;margin:4px 0;">'
-            f'<div style="width:12px;height:12px;border-radius:50%;background:{color};flex-shrink:0;"></div>'
-            f'<span style="color:#ddd;font-size:0.85rem;">{label} <span style="color:#888">({rng})</span></span>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
+st.markdown("<br>", unsafe_allow_html=True)
 
-# ── Auto-refresh logic ────────────────────────────────────────
-if auto_refresh:
-    time.sleep(300)
-    st.rerun()
-
-# ── Fetch data ────────────────────────────────────────────────
-with st.spinner(f"🌐 Fetching data for **{city}** …"):
-    data = get_prediction(city, shap=include_shap)
+# Fetch Data
+with st.spinner("Analyzing atmospheric data models..."):
+    data = get_prediction(city, shap=True)
     hist_df = get_historical_data(city)
 
 if not data:
-    st.error("❌ Could not fetch prediction. Make sure the API is running or you have a trained model.")
+    st.error("❌ Analytics engine offline. Could not fetch data.")
     st.stop()
 
-# ── Alert banner ──────────────────────────────────────────────
-if data.get("current_alert"):
-    st.markdown(
-        f'<div class="alert-box">🚨 AIR QUALITY ALERT — '
-        f'{city} current AQI is {data["current_aqi"]} ({data["current_category"]}). '
-        f'Limit outdoor activities!</div>',
-        unsafe_allow_html=True,
-    )
-    st.markdown("")
+# SECTION 3: AQI CATEGORY + ALERT
+c_aqi = data["current_aqi"]
+if c_aqi > 200:
+    st.markdown(f"<div class='alert-danger'>🚨 DANGER ALERT: Current AQI is {c_aqi:.0f} ({data['current_category']}). Air quality is extremely hazardous! Limit outdoor exposure immediately.</div><br>", unsafe_allow_html=True)
+elif c_aqi > 150:
+    st.markdown(f"<div class='alert-warning'>⚠️ WARNING ALERT: Current AQI is {c_aqi:.0f} ({data['current_category']}). Unhealthy air quality. Sensitive groups should wear masks.</div><br>", unsafe_allow_html=True)
 
-# Check any forecast day alert
-for day in data.get("daily_predictions", []):
-    if day.get("alert"):
-        st.warning(
-            f"⚠️ **Day {day['day']} ({day['date']})** forecast AQI {day['aqi_mean']} — "
-            f"{day['category']}. Unhealthy air quality predicted!"
-        )
+# SECTION 1: SUMMARY CARDS
+st.markdown("<h3 style='color: white; margin-bottom: 20px;'>📊 AQI Overview</h3>", unsafe_allow_html=True)
+c1, c2, c3, c4 = st.columns(4)
 
-# ── Row 1: Current conditions ─────────────────────────────────
-col_gauge, col_weather, col_pollutants = st.columns([1.2, 1, 1])
-
-with col_gauge:
-    st.markdown(f"### 📍 {city} — Current AQI")
-    st.plotly_chart(aqi_gauge(data["current_aqi"]), use_container_width=True, key="gauge")
-    cat   = data["current_category"]
-    color = data["current_color"]
-    emoji = data["current_emoji"]
-    st.markdown(
-        f'<div style="text-align:center;">'
-        f'<span class="aqi-badge" style="background:{color}20;color:{color};'
-        f'border:2px solid {color};">{emoji} {cat}</span></div>',
-        unsafe_allow_html=True,
-    )
-
-with col_weather:
-    st.markdown("### 🌡️ Weather Conditions")
-    w = data.get("current_weather", {})
-    weather_items = [
-        ("🌡️ Temperature", f"{w.get('temp', 'N/A')} °C"),
-        ("💧 Humidity",    f"{w.get('humidity', 'N/A')} %"),
-        ("💨 Wind Speed",  f"{w.get('wind_speed', 'N/A')} m/s"),
-        ("🔵 Pressure",    f"{w.get('pressure', 'N/A')} hPa"),
-    ]
-    for icon_label, val in weather_items:
-        st.markdown(
-            f'<div class="metric-card" style="margin-bottom:10px;">'
-            f'<div style="color:#aaa;font-size:0.85rem;">{icon_label}</div>'
-            f'<div style="color:#fff;font-size:1.4rem;font-weight:700;">{val}</div>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-
-with col_pollutants:
-    st.markdown("### 🧪 Pollutants")
-    p = data.get("current_pollutants", {})
-    if p:
-        st.plotly_chart(pollutant_radar(p), use_container_width=True, key="radar")
-
-st.divider()
-
-# ── Row 2: 3-Day Forecast ─────────────────────────────────────
-st.markdown("## 📅 3-Day AQI Forecast")
-col_f1, col_f2, col_f3 = st.columns(3)
-forecast_cols = [col_f1, col_f2, col_f3]
-days          = data.get("daily_predictions", [])
-
-for i, (col, day) in enumerate(zip(forecast_cols, days)):
+def render_card(col, title, aqi, date, emoji, cat):
+    bg = get_aqi_category_class(aqi)
     with col:
-        alert_badge = "⚠️ ALERT" if day["alert"] else ""
-        st.markdown(
-            f'<div class="forecast-card">'
-            f'<div style="color:#aaa;font-size:0.8rem;">DAY {day["day"]}</div>'
-            f'<div style="color:#fff;font-weight:700;font-size:1rem;">{day["date"]}</div>'
-            f'<div style="font-size:3rem;margin:8px 0;">{day["emoji"]}</div>'
-            f'<div style="color:{day["color"]};font-size:2.4rem;font-weight:900;">{day["aqi_mean"]:.0f}</div>'
-            f'<div style="color:#aaa;font-size:0.8rem;">AQI (Mean)</div>'
-            f'<div style="color:{day["color"]};font-size:1rem;font-weight:600;margin:4px 0;">{day["category"]}</div>'
-            f'<div style="color:#888;font-size:0.78rem;">↑ {day["aqi_max"]:.0f} &nbsp;|&nbsp; ↓ {day["aqi_min"]:.0f}</div>'
-            f'<div style="color:#ff4b2b;font-size:0.85rem;margin-top:6px;">{alert_badge}</div>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
+        st.markdown(f"""
+        <div class="aqi-card {bg}">
+            <div class="card-title">{title}</div>
+            <div class="card-value">{aqi:.0f}</div>
+            <div class="card-subtitle">{emoji} {cat}</div>
+            <div class="card-details">{date}</div>
+        </div>
+        """, unsafe_allow_html=True)
 
-st.markdown("<br>", unsafe_allow_html=True)
-st.markdown("### 📈 Forecast Trend")
-st.plotly_chart(forecast_chart(days), use_container_width=True, key="forecast_chart")
+render_card(c1, "CURRENT", data["current_aqi"], "Live Now", data["current_emoji"], data["current_category"])
 
-st.divider()
+days = data.get("daily_predictions", [])
+if len(days) >= 3:
+    render_card(c2, "TOMORROW", days[0]["aqi_mean"], days[0]["date"], days[0]["emoji"], days[0]["category"])
+    render_card(c3, "DAY 2", days[1]["aqi_mean"], days[1]["date"], days[1]["emoji"], days[1]["category"])
+    render_card(c4, "DAY 3", days[2]["aqi_mean"], days[2]["date"], days[2]["emoji"], days[2]["category"])
 
-# ── Row 3: Historical + SHAP ──────────────────────────────────
-col_hist, col_shap = st.columns(2)
+st.markdown("<br><br>", unsafe_allow_html=True)
 
-with col_hist:
-    st.markdown("### 📜 Historical AQI (Last 7 Days)")
-    if not hist_df.empty and "aqi" in hist_df.columns and "timestamp" in hist_df.columns:
-        hist_df["timestamp"] = pd.to_datetime(hist_df["timestamp"])
-        st.plotly_chart(historical_chart(hist_df), use_container_width=True, key="hist_chart")
-    else:
-        st.info("No historical data available yet. Run the data pipeline first.")
+# SECTION 2 & 5: CHARTS (Trend + SHAP)
+col_trend, col_shap = st.columns([6, 4], gap="large")
+
+with col_trend:
+    st.markdown("<h3 style='color: white;'>📈 AQI Trend & Forecast Analysis</h3>", unsafe_allow_html=True)
+    st.plotly_chart(combined_trend_chart(hist_df, days, data["current_aqi"]), use_container_width=True, config={'displayModeBar': False})
 
 with col_shap:
-    st.markdown("### 🔍 SHAP Feature Importance")
-    if include_shap:
-        shap_data = data.get("shap_explanation", {})
-        top_feats  = shap_data.get("top_features", [])
-        if top_feats:
-            st.plotly_chart(shap_chart(top_feats), use_container_width=True, key="shap_chart")
-            st.caption("Higher SHAP values = stronger influence on AQI prediction")
-        else:
-            st.info(f"SHAP not available: {shap_data.get('error', 'unknown reason')}")
+    st.markdown("<h3 style='color: white;'>🔍 Primary Risk Factors (SHAP)</h3>", unsafe_allow_html=True)
+    if data.get("shap_explanation", {}).get("top_features"):
+        st.plotly_chart(modern_shap_chart(data["shap_explanation"]["top_features"]), use_container_width=True, config={'displayModeBar': False})
     else:
-        st.info("Enable SHAP in sidebar to see feature importance.")
+        st.info("Factor analysis unavailable.")
 
-st.divider()
+st.markdown("<br><br>", unsafe_allow_html=True)
 
-# ── Row 4: Model Info ─────────────────────────────────────────
-st.markdown("### 🤖 Deployed Model Details")
-col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-metrics = data.get("model_metrics", {})
-model_cards = [
-    ("Currently Active", data.get("model_name", "N/A"), "🏆"),
-    ("MAE",   f"{metrics.get('mae', 'N/A')}",  "📉"),
-    ("RMSE",  f"{metrics.get('rmse', 'N/A')}", "📊"),
-    ("R²",    f"{metrics.get('r2', 'N/A')}",   "🎯"),
-]
-for col, (label, val, icon) in zip([col_m1, col_m2, col_m3, col_m4], model_cards):
-    with col:
-        st.markdown(
-            f'<div class="metric-card">'
-            f'<div style="font-size:1.8rem;">{icon}</div>'
-            f'<div style="color:#aaa;font-size:0.85rem;">{label}</div>'
-            f'<div style="color:#667eea;font-size:1.2rem;font-weight:700;">{val}</div>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
+# SECTION 4: MODEL INFO & EXPANDABLE DETAILS
+col_model, col_exp = st.columns([4, 6], gap="large")
 
-st.markdown("<br>", unsafe_allow_html=True)
-st.markdown("### 🥇 Training Leaderboard (All Evaluated Models)")
-st.caption("During the last daily training run, the pipeline automatically tested the following models. The model with the lowest RMSE was automatically deployed.")
+with col_model:
+    st.markdown("<h3 style='color: white;'>🤖 Intelligence Engine</h3>", unsafe_allow_html=True)
+    metrics = data.get("model_metrics", {})
+    st.markdown(f"""
+    <div class="glass-card">
+        <span class="model-tag">🧠 {data.get("model_name", "AI Model")}</span>
+        <div style="margin-top: 24px; display: flex; justify-content: space-between; align-items: flex-end;">
+            <div>
+                <div style="color: #94a3b8; font-size: 0.95rem; margin-bottom: 4px;">Root Mean Square Error</div>
+                <div style="font-size: 2.5rem; font-weight: 800; color: #f8fafc; line-height: 1;">{metrics.get('rmse', '0.0')}</div>
+            </div>
+            <div style="text-align: right;">
+                <div style="color: #94a3b8; font-size: 0.95rem; margin-bottom: 4px;">R² Score</div>
+                <div style="font-size: 1.8rem; font-weight: 700; color: #38bdf8; line-height: 1;">{metrics.get('r2', '0.0')}</div>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
-try:
-    import pandas as pd
-    comp_df = pd.read_csv("models/model_comparison.csv")
+with col_exp:
+    st.markdown("<h3 style='color: white;'>💡 Advanced Analytics</h3>", unsafe_allow_html=True)
     
-    # Highlight the deployed model
-    deployed_name = data.get("model_name", "")
-    
-    def highlight_deployed(row):
-        if row['model_name'] == deployed_name:
-            return ['background-color: rgba(102, 126, 234, 0.3)'] * len(row)
-        return [''] * len(row)
+    with st.expander("🌤️ Show Detailed Atmospheric Conditions", expanded=False):
+        w = data.get("current_weather", {})
+        c_cols = st.columns(4)
+        c_cols[0].metric("Temperature", f"{w.get('temp', 0)} °C")
+        c_cols[1].metric("Humidity", f"{w.get('humidity', 0)} %")
+        c_cols[2].metric("Wind Speed", f"{w.get('wind_speed', 0)} m/s")
+        c_cols[3].metric("Pressure", f"{w.get('pressure', 0)} hPa")
         
-    st.dataframe(
-        comp_df.style.apply(highlight_deployed, axis=1).format({
-            "rmse": "{:.4f}",
-            "mae": "{:.4f}",
-            "r2": "{:.4f}"
-        }),
-        use_container_width=True,
-        hide_index=True
-    )
-except Exception as e:
-    st.info("Leaderboard data not currently available.")
+    with st.expander("🏆 Show Model Training Leaderboard", expanded=False):
+        try:
+            comp_df = pd.read_csv("models/model_comparison.csv")
+            
+            # Simple highlighter for deployed model
+            deployed = data.get("model_name", "")
+            def highlight(row):
+                return ['background-color: rgba(56, 189, 248, 0.15)'] * len(row) if row['model_name'] == deployed else [''] * len(row)
+                
+            st.dataframe(
+                comp_df.style.apply(highlight, axis=1).format({"rmse": "{:.4f}", "mae": "{:.4f}", "r2": "{:.4f}"}),
+                use_container_width=True, hide_index=True
+            )
+        except Exception:
+            st.info("Leaderboard data unavailable locally.")
 
-# ── Footer ────────────────────────────────────────────────────
-st.markdown("<br>", unsafe_allow_html=True)
+# Footer
+st.markdown("<br><hr style='border-color: rgba(255,255,255,0.05);'>", unsafe_allow_html=True)
 st.markdown(
-    '<div style="text-align:center;color:#555;font-size:0.8rem;">'
-    'Pearls AQI Predictor © 2026 &nbsp;|&nbsp; '
-    'Data: OpenWeatherMap API &nbsp;|&nbsp; '
+    f'<div style="text-align:center;color:#64748b;font-size:0.85rem;padding:20px 0;">'
+    f'Pearls AQI Predictor © 2026 &nbsp;&bull;&nbsp; '
+    f'Data: OpenWeatherMap API &nbsp;&bull;&nbsp; '
     f'Last updated: {data.get("generated_at", "")[:16]}'
-    '</div>',
-    unsafe_allow_html=True,
+    f'</div>',
+    unsafe_allow_html=True
 )

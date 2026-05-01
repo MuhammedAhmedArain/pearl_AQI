@@ -52,7 +52,7 @@
     "aqi_ewm_24h",
     "aqi_ewm_72h"
   ],
-  "trained_at": "2026-04-30T19:45:19.369519",
+  "trained_at": "2026-05-01T08:29:16.219011",
   "config": {
     "test_size": 0.2,
     "cv_folds": 5,
