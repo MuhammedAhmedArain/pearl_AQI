@@ -110,6 +110,14 @@ def clean_data(df: pd.DataFrame) -> pd.DataFrame:
     df[config.TARGET_COLUMN] = df[config.TARGET_COLUMN].clip(0, 500)
 
     logger.info(f"Cleaning: {original_len} → {len(df)} rows (removed {original_len - len(df)})")
+
+    if len(df) == 0:
+        raise ValueError(
+            f"No data remaining after filtering for cities {config.SUPPORTED_CITIES}. "
+            "Ensure the Feature Store or sample CSV contains data for the target city. "
+            "Run `python src/backfill.py` to populate the Feature Store."
+        )
+
     return df
 
 

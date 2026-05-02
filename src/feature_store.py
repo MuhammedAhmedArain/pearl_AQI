@@ -233,33 +233,56 @@ def get_training_data(days: int = 90) -> pd.DataFrame:
     fs = get_feature_store()
     logger.info(f"Fetching last {days} days of training data from Feature Store ...")
 
-    try:
-        # Try to get existing feature view
-        fv = fs.get_feature_view(
-            name=config.FEATURE_VIEW_NAME,
-            version=config.FEATURE_VIEW_VERSION,
-        )
-    except Exception:
-        # Create feature view from feature group
-        fg = get_or_create_feature_group()
-        fv = fs.get_or_create_feature_view(
-            name=config.FEATURE_VIEW_NAME,
-            version=config.FEATURE_VIEW_VERSION,
-            query=fg.select_all(),
-        )
+    fg = get_or_create_feature_group()
 
-    # Compute time range
+    # --- Obtain (or re-create) the Feature View ----------------------
+    fv = None
+    for attempt in range(2):
+        try:
+            fv = fs.get_feature_view(
+                name=config.FEATURE_VIEW_NAME,
+                version=config.FEATURE_VIEW_VERSION,
+            )
+            # Smoke-test: if the view is stale it may return None on queries
+            test_df = fv.get_batch_data()
+            if test_df is not None and len(test_df) > 0:
+                break  # view is healthy
+            # View exists but returns no data — delete and recreate
+            logger.warning("Feature View returned empty data, recreating ...")
+            try:
+                fv.delete()
+            except Exception:
+                pass
+            fv = None
+        except Exception:
+            fv = None
+
+        if fv is None:
+            logger.info("Creating fresh Feature View from Feature Group ...")
+            fv = fs.get_or_create_feature_view(
+                name=config.FEATURE_VIEW_NAME,
+                version=config.FEATURE_VIEW_VERSION,
+                query=fg.select_all(),
+            )
+
+    # --- Fetch data ---------------------------------------------------
     end_dt   = datetime.utcnow()
     start_dt = end_dt - timedelta(days=days)
 
+    df = None
     try:
         df, _ = fv.training_data(
             start_time=start_dt,
             end_time=end_dt,
         )
     except Exception:
-        # Fallback: get all data without time filter
-        df = fv.get_batch_data()
+        pass
+
+    if df is None or len(df) == 0:
+        try:
+            df = fv.get_batch_data()
+        except Exception:
+            pass
 
     if df is None or len(df) == 0:
         raise ValueError(
