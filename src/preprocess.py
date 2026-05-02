@@ -24,14 +24,13 @@ import pandas as pd
 import numpy as np
 import joblib
 from pathlib import Path
-from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import RobustScaler
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import config
-from src.utils import get_logger, timer
+import config  # noqa: E402
+from src.utils import get_logger, timer  # noqa: E402
 
 logger = get_logger(__name__)
 
@@ -49,7 +48,9 @@ def load_from_feature_store() -> pd.DataFrame:
     return get_training_data(days=90)
 
 
-def load_raw_data(path: Path = config.RAW_DATA_FILE, source: str = "auto") -> pd.DataFrame:
+def load_raw_data(
+    path: Path = config.RAW_DATA_FILE, source: str = "auto"
+) -> pd.DataFrame:
     """
     Load AQI data with source priority:
       source="auto":
@@ -60,7 +61,10 @@ def load_raw_data(path: Path = config.RAW_DATA_FILE, source: str = "auto") -> pd
       source="csv"           -- force CSV
     """
     # -- Feature Store path -------------------------------------------
-    if source == "feature_store" or (source == "auto" and config.USE_FEATURE_STORE):
+    if (
+        source == "feature_store" or
+        (source == "auto" and config.USE_FEATURE_STORE)
+    ):
         try:
             df = load_from_feature_store()
             logger.info(f"Loaded {len(df)} rows from Hopsworks Feature Store.")
@@ -68,7 +72,9 @@ def load_raw_data(path: Path = config.RAW_DATA_FILE, source: str = "auto") -> pd
         except Exception as exc:
             if source == "feature_store":
                 raise
-            logger.warning(f"Feature Store unavailable ({exc}). Falling back to CSV.")
+            logger.warning(
+                f"Feature Store unavailable ({exc}). Falling back to CSV."
+            )
 
     # -- CSV path -----------------------------------------------------
     if path.exists():
@@ -96,7 +102,10 @@ def clean_data(df: pd.DataFrame) -> pd.DataFrame:
     original_len = len(df)
 
     # Sort and deduplicate
-    df = df.drop_duplicates(subset=["timestamp", "city"] if "city" in df.columns else ["timestamp"])
+    subset = (
+        ["timestamp", "city"] if "city" in df.columns else ["timestamp"]
+    )
+    df = df.drop_duplicates(subset=subset)
     df = df.sort_values("timestamp").reset_index(drop=True)
 
     # Filter to only supported cities
@@ -109,13 +118,17 @@ def clean_data(df: pd.DataFrame) -> pd.DataFrame:
     # Clip AQI to valid range
     df[config.TARGET_COLUMN] = df[config.TARGET_COLUMN].clip(0, 500)
 
-    logger.info(f"Cleaning: {original_len} → {len(df)} rows (removed {original_len - len(df)})")
+    logger.info(
+        f"Cleaning: {original_len} → {len(df)} rows "
+        f"(removed {original_len - len(df)})"
+    )
 
     if len(df) == 0:
         raise ValueError(
-            f"No data remaining after filtering for cities {config.SUPPORTED_CITIES}. "
-            "Ensure the Feature Store or sample CSV contains data for the target city. "
-            "Run `python src/backfill.py` to populate the Feature Store."
+            f"No data remaining after filtering for cities "
+            f"{config.SUPPORTED_CITIES}. Ensure the Feature Store or sample "
+            f"CSV contains data for the target city. Run "
+            f"`python src/backfill.py` to populate the Feature Store."
         )
 
     return df
@@ -141,28 +154,36 @@ def handle_missing_values(df: pd.DataFrame) -> pd.DataFrame:
             logger.debug(f"Median imputed '{col}' with {median_val:.3f}")
 
     remaining = df.isna().sum().sum()
-    logger.info(f"Missing value handling complete. Remaining NaNs: {remaining}")
+    logger.info(
+        f"Missing value handling complete. Remaining NaNs: {remaining}"
+    )
     return df
 
 
-def remove_outliers(df: pd.DataFrame, columns: list[str] = None) -> pd.DataFrame:
+def remove_outliers(
+    df: pd.DataFrame, columns: list[str] = None
+) -> pd.DataFrame:
     """
     Remove outliers using IQR method (1.5× IQR fence) for specified columns.
     Default columns: aqi, pm2_5, pm10.
-    Outliers are capped (Winsorized), not dropped, to preserve time-series structure.
+    Outliers are capped (Winsorized), not dropped, to preserve
+    time-series structure.
     """
     if columns is None:
         columns = [c for c in ["aqi", "pm2_5", "pm10"] if c in df.columns]
 
     for col in columns:
-        q1  = df[col].quantile(0.25)
-        q3  = df[col].quantile(0.75)
+        q1 = df[col].quantile(0.25)
+        q3 = df[col].quantile(0.75)
         iqr = q3 - q1
-        lo  = q1 - 1.5 * iqr
-        hi  = q3 + 1.5 * iqr
+        lo = q1 - 1.5 * iqr
+        hi = q3 + 1.5 * iqr
         clipped = (df[col] < lo) | (df[col] > hi)
         df[col] = df[col].clip(lo, hi)
-        logger.debug(f"Outlier cap '{col}': [{lo:.2f}, {hi:.2f}], {clipped.sum()} values clipped")
+        logger.debug(
+            f"Outlier cap '{col}': [{lo:.2f}, {hi:.2f}], "
+            f"{clipped.sum()} values clipped"
+        )
 
     return df
 
@@ -178,17 +199,19 @@ def scale_features(
 ) -> tuple[pd.DataFrame, pd.DataFrame, RobustScaler]:
     """
     Fit RobustScaler on training data only, then transform both sets.
-    RobustScaler is chosen because it is resistant to outliers (uses median + IQR).
+    RobustScaler is resistant to outliers (uses median + IQR).
 
     Returns:
         (X_train_scaled, X_test_scaled, fitted_scaler)
     """
     scaler = RobustScaler()
     X_train_sc = X_train.copy()
-    X_test_sc  = X_test.copy()
+    X_test_sc = X_test.copy()
 
-    X_train_sc[feature_columns] = scaler.fit_transform(X_train[feature_columns])
-    X_test_sc[feature_columns]  = scaler.transform(X_test[feature_columns])
+    X_train_sc[feature_columns] = scaler.fit_transform(
+        X_train[feature_columns]
+    )
+    X_test_sc[feature_columns] = scaler.transform(X_test[feature_columns])
 
     # Persist scaler
     joblib.dump(scaler, config.SCALER_PATH)
@@ -213,7 +236,10 @@ def split_data(
     Returns:
         (X_train, X_test, y_train, y_test)
     """
-    feature_cols = [c for c in df.columns if c not in [target_col, "timestamp", "city"]]
+    feature_cols = [
+        c for c in df.columns
+        if c not in [target_col, "timestamp", "city"]
+    ]
 
     X = df[feature_cols]
     y = df[target_col]
@@ -223,8 +249,8 @@ def split_data(
     y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
 
     logger.info(
-        f"Train/test split: {len(X_train)} train rows, {len(X_test)} test rows "
-        f"(split at index {split_idx})"
+        f"Train/test split: {len(X_train)} train rows, {len(X_test)} "
+        f"test rows (split at index {split_idx})"
     )
     return X_train, X_test, y_train, y_test
 
@@ -238,13 +264,15 @@ def run_preprocessing_pipeline(
     raw_path: Path = config.RAW_DATA_FILE,
     save_processed: bool = True,
     source: str = "auto",
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, list[str], RobustScaler]:
+) -> tuple[
+    pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, list[str], RobustScaler
+]:
     """
     End-to-end preprocessing pipeline:
-      load (FS or CSV) -> clean -> impute -> outlier-cap -> feature-engineer -> split -> scale
+      load (FS or CSV) -> clean -> impute -> outlier-cap -> engineer -> split
 
     Args:
-        raw_path:       Path to raw CSV (used when source='csv' or FS unavailable)
+        raw_path:       Path to raw CSV (used when FS unavailable)
         save_processed: If True, save processed DataFrame to CSV for debugging
         source:         "auto" | "feature_store" | "csv"
                         "auto" tries Feature Store first, falls back to CSV.
@@ -288,15 +316,18 @@ def run_preprocessing_pipeline(
     ]
 
     # 9. Scale
-    X_train_sc, X_test_sc, scaler = scale_features(X_train, X_test, feature_cols)
+    X_train_sc, X_test_sc, scaler = scale_features(
+        X_train, X_test, feature_cols
+    )
 
     # 10. Persist feature names (needed for future prediction)
-    import json
     config.FEATURE_NAMES_PATH.write_text(json.dumps(feature_cols))
-    logger.info(f"Feature names saved -> {config.FEATURE_NAMES_PATH} ({len(feature_cols)} features)")
+    logger.info(
+        f"Feature names saved -> {config.FEATURE_NAMES_PATH} "
+        f"({len(feature_cols)} features)"
+    )
 
     return X_train_sc, X_test_sc, y_train, y_test, feature_cols, scaler
-
 
 
 # ══════════════════════════════════════════════════════════════
@@ -305,6 +336,6 @@ def run_preprocessing_pipeline(
 
 if __name__ == "__main__":
     X_tr, X_te, y_tr, y_te, feats, sc = run_preprocessing_pipeline()
-    print(f"\n✅ Preprocessing complete")
+    print("\n✅ Preprocessing complete")
     print(f"   Train: {X_tr.shape}, Test: {X_te.shape}")
     print(f"   Features ({len(feats)}): {feats[:5]} …")

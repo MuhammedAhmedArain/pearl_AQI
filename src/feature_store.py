@@ -19,7 +19,6 @@ Design:
   - Lazy connection: Hopsworks client is only created on first use.
 """
 
-import os
 import json
 import tempfile
 import warnings
@@ -27,14 +26,14 @@ import numpy as np
 import pandas as pd
 import joblib
 from pathlib import Path
-from typing import Optional, Any
+from typing import Any
 from datetime import datetime, timedelta
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import config
-from src.utils import get_logger
+import config  # noqa: E402
+from src.utils import get_logger  # noqa: E402
 
 warnings.filterwarnings("ignore")
 logger = get_logger(__name__)
@@ -53,9 +52,9 @@ class FeatureStoreNotConfigured(RuntimeError):
 # CONNECTION (lazy singleton)
 # ══════════════════════════════════════════════════════════════
 
-_project    = None
-_fs         = None
-_mr         = None
+_project = None
+_fs = None
+_mr = None
 
 
 def _connect() -> tuple:
@@ -74,7 +73,10 @@ def _connect() -> tuple:
     if _project is None:
         try:
             import hopsworks
-            logger.info(f"Connecting to Hopsworks project '{config.HOPSWORKS_PROJECT}' ...")
+            logger.info(
+                f"Connecting to Hopsworks project "
+                f"'{config.HOPSWORKS_PROJECT}' ..."
+            )
             _project = hopsworks.login(
                 host=config.HOPSWORKS_HOST,
                 project=config.HOPSWORKS_PROJECT,
@@ -133,14 +135,18 @@ def _prepare_df_for_hopsworks(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
     # Normalise column names
-    df.columns = [c.lower().replace(" ", "_").replace("-", "_") for c in df.columns]
+    df.columns = [
+        c.lower().replace(" ", "_").replace("-", "_") for c in df.columns
+    ]
 
     # Ensure timestamp is datetime
     if "timestamp" in df.columns:
         df["timestamp"] = pd.to_datetime(df["timestamp"])
         # Strip timezone info (make naive UTC)
         if df["timestamp"].dt.tz is not None:
-            df["timestamp"] = df["timestamp"].dt.tz_convert("UTC").dt.tz_localize(None)
+            df["timestamp"] = (
+                df["timestamp"].dt.tz_convert("UTC").dt.tz_localize(None)
+            )
 
     # Drop rows missing primary keys
     pk_cols = [c for c in ["city", "timestamp"] if c in df.columns]
@@ -178,19 +184,28 @@ def get_or_create_feature_group():
             version=config.FEATURE_GROUP_VERSION,
         )
         if fg is not None:
-            logger.info(f"Found existing feature group: {config.FEATURE_GROUP_NAME} v{config.FEATURE_GROUP_VERSION}")
+            logger.info(
+                f"Found existing feature group: {config.FEATURE_GROUP_NAME} "
+                f"v{config.FEATURE_GROUP_VERSION}"
+            )
             return fg
     except Exception:
         pass  # will create below
 
-    logger.info(f"Creating feature group: {config.FEATURE_GROUP_NAME} v{config.FEATURE_GROUP_VERSION}")
+    logger.info(
+        f"Creating feature group: {config.FEATURE_GROUP_NAME} "
+        f"v{config.FEATURE_GROUP_VERSION}"
+    )
 
     # We create a minimal schema DataFrame to register the feature group
     # The actual data is inserted separately via fg.insert()
     fg = fs.get_or_create_feature_group(
         name=config.FEATURE_GROUP_NAME,
         version=config.FEATURE_GROUP_VERSION,
-        description="Hourly AQI observations + engineered features for Pearls AQI Predictor",
+        description=(
+            "Hourly AQI observations + engineered features "
+            "for Pearls AQI Predictor"
+        ),
         primary_key=["city", "timestamp"],
         event_time="timestamp",
         online_enabled=False,          # Offline-only (saves cost)
@@ -216,7 +231,9 @@ def push_features(df: pd.DataFrame) -> None:
     df_ready = _prepare_df_for_hopsworks(df)
 
     fg.insert(df_ready, write_options={"wait_for_job": False})
-    logger.info(f"Feature Store: inserted {len(df_ready)} rows into '{fg.name}'.")
+    logger.info(
+        f"Feature Store: inserted {len(df_ready)} rows into '{fg.name}'."
+    )
 
 
 # ══════════════════════════════════════════════════════════════
@@ -231,7 +248,9 @@ def get_training_data(days: int = 90) -> pd.DataFrame:
     Raises FeatureStoreNotConfigured if Hopsworks is not set up.
     """
     fs = get_feature_store()
-    logger.info(f"Fetching last {days} days of training data from Feature Store ...")
+    logger.info(
+        f"Fetching last {days} days of training data from Feature Store ..."
+    )
 
     fg = get_or_create_feature_group()
 
@@ -266,7 +285,7 @@ def get_training_data(days: int = 90) -> pd.DataFrame:
             )
 
     # --- Fetch data ---------------------------------------------------
-    end_dt   = datetime.utcnow()
+    end_dt = datetime.utcnow()
     start_dt = end_dt - timedelta(days=days)
 
     df = None
@@ -351,14 +370,16 @@ def save_model_to_registry(
       - model_metadata.json
     """
     mr = get_model_registry()
-    logger.info(f"Saving model '{metadata.get('model_name')}' to Model Registry ...")
+    logger.info(
+        f"Saving model '{metadata.get('model_name')}' to Model Registry ..."
+    )
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
 
         # Save artefacts to temp dir
-        joblib.dump(model,   tmp / "best_model.pkl")
-        joblib.dump(scaler,  tmp / "scaler.pkl")
+        joblib.dump(model, tmp / "best_model.pkl")
+        joblib.dump(scaler, tmp / "scaler.pkl")
         (tmp / "feature_names.json").write_text(json.dumps(feature_names))
         (tmp / "model_metadata.json").write_text(json.dumps(metadata))
 
@@ -367,12 +388,14 @@ def save_model_to_registry(
             name=config.MODEL_NAME,
             metrics={
                 "rmse": metadata.get("rmse", 0),
-                "mae":  metadata.get("mae",  0),
-                "r2":   metadata.get("r2",   0),
+                "mae": metadata.get("mae", 0),
+                "r2": metadata.get("r2", 0),
             },
             description=(
-                f"Pearls AQI Predictor — {metadata.get('model_name', 'unknown')} "
-                f"| RMSE={metadata.get('rmse')} | Trained {metadata.get('trained_at','')}"
+                f"Pearls AQI Predictor — "
+                f"{metadata.get('model_name', 'unknown')} | "
+                f"RMSE={metadata.get('rmse')} | "
+                f"Trained {metadata.get('trained_at', '')}"
             ),
             input_example=None,
             model_schema=None,
@@ -404,7 +427,6 @@ def load_model_from_registry() -> tuple[Any, Any, list[str], dict]:
     logger.info(f"Loading model '{config.MODEL_NAME}' from Model Registry ...")
 
     try:
-        # Get best version (lowest RMSE)
         model_entry = mr.get_best_model(
             name=config.MODEL_NAME,
             metric="rmse",
@@ -424,13 +446,19 @@ def load_model_from_registry() -> tuple[Any, Any, list[str], dict]:
         model_dir = model_entry.download(local_path=tmpdir)
         model_path = Path(model_dir)
 
-        model        = joblib.load(model_path / "best_model.pkl")
-        scaler_file  = model_path / "scaler.pkl"
-        scaler       = joblib.load(scaler_file) if scaler_file.exists() else None
-        fn_file      = model_path / "feature_names.json"
-        feature_names = json.loads(fn_file.read_text()) if fn_file.exists() else []
-        meta_file    = model_path / "model_metadata.json"
-        metadata     = json.loads(meta_file.read_text()) if meta_file.exists() else {}
+        model = joblib.load(model_path / "best_model.pkl")
+        scaler_file = model_path / "scaler.pkl"
+        scaler = joblib.load(scaler_file) if scaler_file.exists() else None
+        fn_file = model_path / "feature_names.json"
+        feature_names = (
+            json.loads(fn_file.read_text()) if fn_file.exists() else []
+        )
+        meta_file = model_path / "model_metadata.json"
+        metadata = (
+            json.loads(meta_file.read_text()) if meta_file.exists() else {}
+        )
 
-    logger.info(f"Loaded model from Registry: {metadata.get('model_name', 'Unknown')}")
+    logger.info(
+        f"Loaded model from Registry: {metadata.get('model_name', 'Unknown')}"
+    )
     return model, scaler, feature_names, metadata
