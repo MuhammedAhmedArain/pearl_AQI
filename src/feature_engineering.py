@@ -54,12 +54,12 @@ def add_time_features(df: pd.DataFrame) -> pd.DataFrame:
     df["quarter"]      = ts.dt.quarter
 
     # ── Cyclic encoding ──────────────────────────────────────
-    df["hour_sin"]   = np.sin(2 * np.pi * df["hour"]  / 24)
-    df["hour_cos"]   = np.cos(2 * np.pi * df["hour"]  / 24)
-    df["month_sin"]  = np.sin(2 * np.pi * df["month"] / 12)
-    df["month_cos"]  = np.cos(2 * np.pi * df["month"] / 12)
-    df["dow_sin"]    = np.sin(2 * np.pi * df["day_of_week"] / 7)
-    df["dow_cos"]    = np.cos(2 * np.pi * df["day_of_week"] / 7)
+    df["hour_sin"] = np.sin(2 * np.pi * df["hour"] / 24)
+    df["hour_cos"] = np.cos(2 * np.pi * df["hour"] / 24)
+    df["month_sin"] = np.sin(2 * np.pi * df["month"] / 12)
+    df["month_cos"] = np.cos(2 * np.pi * df["month"] / 12)
+    df["dow_sin"] = np.sin(2 * np.pi * df["day_of_week"] / 7)
+    df["dow_cos"] = np.cos(2 * np.pi * df["day_of_week"] / 7)
 
     logger.debug("Time features added.")
     return df
@@ -79,14 +79,24 @@ def add_lag_features(
     Also adds lag features for key pollutants if present.
     """
     df = df.copy()
+    n = len(df)
 
     for lag in lags:
-        df[f"{col}_lag_{lag}"] = df[col].shift(lag)
-        logger.debug(f"Lag feature: {col}_lag_{lag}")
+        # Only add lag column if we have at least `lag` previous rows.
+        # Otherwise the column would be all-NaN and later dropna() would remove
+        # all rows.
+        if lag < n:
+            df[f"{col}_lag_{lag}"] = df[col].shift(lag)
+            logger.debug(f"Lag feature: {col}_lag_{lag}")
+        else:
+            logger.debug(
+                f"Skipping lag feature {col}_lag_{lag} (lag {lag} >= "
+                f"data length {n})"
+            )
 
     # Pollutant lags (lag-1 only to control dimensionality)
     for pollutant in ["pm2_5", "pm10", "no2", "o3"]:
-        if pollutant in df.columns:
+        if pollutant in df.columns and n > 1:
             df[f"{pollutant}_lag_1"] = df[pollutant].shift(1)
 
     return df
@@ -114,7 +124,8 @@ def add_rolling_features(
             df[col].shift(1).rolling(window=w_hours, min_periods=1).mean()
         )
         df[f"{col}_roll_std_{w}d"] = (
-            df[col].shift(1).rolling(window=w_hours, min_periods=1).std().fillna(0)
+            df[col].shift(1).rolling(window=w_hours, min_periods=1).std()
+            .fillna(0)
         )
         logger.debug(f"Rolling features: {col} × {w}d window")
 
@@ -135,9 +146,9 @@ def add_change_features(
     """
     df = df.copy()
 
-    df[f"{col}_diff_1h"]  = df[col].diff(1)
-    df[f"{col}_diff_3h"]  = df[col].diff(3)
-    df[f"{col}_pct_1h"]   = df[col].pct_change(1).replace([np.inf, -np.inf], 0)
+    df[f"{col}_diff_1h"] = df[col].diff(1)
+    df[f"{col}_diff_3h"] = df[col].diff(3)
+    df[f"{col}_pct_1h"] = df[col].pct_change(1).replace([np.inf, -np.inf], 0)
 
     return df
 
@@ -179,9 +190,9 @@ def add_ewm_features(
     """
     df = df.copy()
 
-    df[f"{col}_ewm_12h"] = df[col].shift(1).ewm(span=12,  adjust=False).mean()
-    df[f"{col}_ewm_24h"] = df[col].shift(1).ewm(span=24,  adjust=False).mean()
-    df[f"{col}_ewm_72h"] = df[col].shift(1).ewm(span=72,  adjust=False).mean()
+    df[f"{col}_ewm_12h"] = df[col].shift(1).ewm(span=12, adjust=False).mean()
+    df[f"{col}_ewm_24h"] = df[col].shift(1).ewm(span=24, adjust=False).mean()
+    df[f"{col}_ewm_72h"] = df[col].shift(1).ewm(span=72, adjust=False).mean()
 
     return df
 

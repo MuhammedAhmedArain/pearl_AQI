@@ -77,6 +77,16 @@ def load_raw_data(
             )
 
     # -- CSV path -----------------------------------------------------
+    # Prefer processed (already engineered) dataset when present
+    if config.PROCESSED_DATA_FILE.exists():
+        df = pd.read_csv(config.PROCESSED_DATA_FILE, parse_dates=["timestamp"])
+        logger.info(
+            f"Loaded processed data: {len(df)} rows from "
+            f"{config.PROCESSED_DATA_FILE}"
+        )
+        return df
+
+    # Otherwise try raw data file (data/raw_aqi_data.csv)
     if path.exists():
         df = pd.read_csv(path, parse_dates=["timestamp"])
         logger.info(f"Loaded raw data: {len(df)} rows from {path}")
