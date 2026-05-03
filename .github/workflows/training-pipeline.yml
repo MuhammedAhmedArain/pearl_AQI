@@ -5,6 +5,9 @@ on:
     - cron: '0 2 * * *'       # daily at 02:00 UTC
   workflow_dispatch:           # allow manual trigger
 
+permissions:
+  contents: write
+
 env:
   PYTHON_VERSION: '3.11'
 
