@@ -1,11 +1,11 @@
 {
   "model_name": "Linear Regression",
-  "mae": 0.0,
-  "rmse": 0.0,
+  "mae": 0.007,
+  "rmse": 0.0095,
   "r2": 1.0,
-  "cv_rmse_mean": 0.0,
-  "cv_rmse_std": 0.0,
-  "feature_count": 44,
+  "cv_rmse_mean": 0.0331,
+  "cv_rmse_std": 0.0172,
+  "feature_count": 49,
   "feature_names": [
     "pm2_5",
     "pm10",
@@ -15,6 +15,11 @@
     "o3",
     "so2",
     "nh3",
+    "temp",
+    "humidity",
+    "wind_speed",
+    "pressure",
+    "visibility",
     "hour",
     "day_of_week",
     "day_of_month",
@@ -52,7 +57,7 @@
     "aqi_ewm_24h",
     "aqi_ewm_72h"
   ],
-  "trained_at": "2026-05-01T08:29:16.219011",
+  "trained_at": "2026-05-03T08:34:33.346749",
   "config": {
     "test_size": 0.2,
     "cv_folds": 5,
