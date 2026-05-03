@@ -246,8 +246,11 @@ col_city, col_btn, col_space = st.columns([2, 1, 6])
 with col_city:
     city = st.selectbox("Location", options=config.SUPPORTED_CITIES, label_visibility="collapsed")
 with col_btn:
-    if st.button("🔄 Refresh Data", use_container_width=True):
+    if st.button("🔄 Sync with Cloud", use_container_width=True, help="Force refresh data and reload latest model from Registry"):
         st.cache_data.clear()
+        st.success("Cache cleared! Reloading...")
+        time.sleep(0.5)
+        st.rerun()
 
 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -318,7 +321,10 @@ with col_model:
     st.markdown(f"""
     <div class="glass-card">
         <span class="model-tag">🧠 {data.get("model_name", "AI Model")}</span>
-        <div style="margin-top: 24px; display: flex; justify-content: space-between; align-items: flex-end;">
+        <div style="margin-top: 15px; font-size: 0.85rem; color: #94a3b8;">
+            📅 Last Trained: <b>{data.get("model_metrics", {}).get("trained_at", "N/A")}</b>
+        </div>
+        <div style="margin-top: 15px; display: flex; justify-content: space-between; align-items: flex-end;">
             <div>
                 <div style="color: #94a3b8; font-size: 0.95rem; margin-bottom: 4px;">Root Mean Square Error</div>
                 <div style="font-size: 2.5rem; font-weight: 800; color: #f8fafc; line-height: 1;">{metrics.get('rmse', '0.0')}</div>

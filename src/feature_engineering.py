@@ -269,9 +269,14 @@ def generate_future_features(
         row["dow_sin"]   = np.sin(2 * np.pi * row["day_of_week"] / 7)
         row["dow_cos"]   = np.cos(2 * np.pi * row["day_of_week"] / 7)
 
-        # ── Lag features (use last known AQI) ────────────────
+        # ── Lag features (use last known AQI + time variance) ────────
+        # We add a small sinusodial fluctuation based on hour of day
+        # to ensure the model doesn't see perfectly static inputs.
+        time_variance = 5 * np.sin(2 * np.pi * row["hour"] / 24)
+        sim_aqi = max(10, last_aqi + time_variance)
+
         for lag in config.LAG_PERIODS:
-            row[f"aqi_lag_{lag}"] = last_aqi  # Simplified: use last known
+            row[f"aqi_lag_{lag}"] = sim_aqi
 
         # ── Rolling features ─────────────────────────────────
         for w in config.ROLLING_WINDOWS:
