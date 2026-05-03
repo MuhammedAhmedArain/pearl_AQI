@@ -1,0 +1,35 @@
+name: Pearls AQI Predictor — Hourly Feature Pipeline
+
+on:
+  schedule:
+    - cron: '0 * * * *'       # every hour
+  workflow_dispatch:           # allow manual trigger
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  feature-pipeline:
+    name: Hourly Feature Pipeline
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run feature pipeline
+        env:
+          OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
+          HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
+          HOPSWORKS_PROJECT: pearlsAQI
+          HOPSWORKS_HOST: eu-west.cloud.hopsworks.ai
+        run: |
+          python src/fetch_data.py --city "Sukkur" --push-to-store

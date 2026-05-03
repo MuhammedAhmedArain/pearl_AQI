@@ -1,0 +1,55 @@
+name: Pearls AQI Predictor — Daily Training Pipeline
+
+on:
+  schedule:
+    - cron: '0 2 * * *'       # daily at 02:00 UTC
+  workflow_dispatch:           # allow manual trigger
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  training-pipeline:
+    name: Daily Training Pipeline
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run training pipeline
+        env:
+          OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
+          HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
+          HOPSWORKS_PROJECT: pearlsAQI
+          HOPSWORKS_HOST: eu-west.cloud.hopsworks.ai
+        run: |
+          python src/train.py --no-tune
+
+      - name: Upload model artifacts (backup)
+        uses: actions/upload-artifact@v4
+        with:
+          name: trained-models-${{ github.run_number }}
+          path: models/
+          retention-days: 30
+
+      - name: Post model metrics summary
+        run: |
+          python -c "
+          import json, pathlib
+          m = json.loads(pathlib.Path('models/model_metadata.json').read_text())
+          print('=== Model Training Results ===')
+          print(f'Model : {m[\"model_name\"]}')
+          print(f'MAE   : {m[\"mae\"]}')
+          print(f'RMSE  : {m[\"rmse\"]}')
+          print(f'R2    : {m[\"r2\"]}')
+          print(f'Trained at: {m[\"trained_at\"]}')
+          "

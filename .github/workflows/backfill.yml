@@ -1,0 +1,36 @@
+name: Pearls AQI Predictor — Backfill (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: 'Number of days to backfill'
+        required: true
+        default: '90'
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  backfill:
+    name: Backfill Feature Store
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run backfill
+        env:
+          HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
+          HOPSWORKS_PROJECT: pearlsAQI
+          HOPSWORKS_HOST: eu-west.cloud.hopsworks.ai
+        run: python src/backfill.py --days ${{ github.event.inputs.days }}
