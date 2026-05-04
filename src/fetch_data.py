@@ -337,9 +337,24 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Fetch AQI data for a city.")
     parser.add_argument("--city", default=config.DEFAULT_CITY, help="City name")
     parser.add_argument("--no-cache", action="store_true", help="Bypass cache")
+    parser.add_argument("--push-to-store", action="store_true", help="Push results to Feature Store")
     args = parser.parse_args()
 
     weather, aqi, hist = fetch_city_data(args.city, use_cache=not args.no_cache)
+
+    if args.push_to_store:
+        try:
+            from src.feature_engineering import add_all_features
+            from src.feature_store import push_features
+
+            # Prepare data for push: We need enough history for lag features
+            featured_df = add_all_features(hist.copy())
+            latest_row  = featured_df.tail(1)
+
+            push_features(latest_row)
+            print("🚀 Successfully pushed latest observation to Feature Store.")
+        except Exception as e:
+            print(f"❌ Failed to push to Feature Store: {e}")
     print(f"\n📍 City     : {args.city}")
     print(f"🌡  Temp     : {weather['temp']}°C")
     print(f"💨 AQI      : {aqi['aqi']}")
