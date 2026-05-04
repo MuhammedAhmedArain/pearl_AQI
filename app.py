@@ -318,20 +318,25 @@ col_model, col_exp = st.columns([4, 6], gap="large")
 with col_model:
     st.markdown("<h3 style='color: white;'>🤖 Intelligence Engine</h3>", unsafe_allow_html=True)
     metrics = data.get("model_metrics", {})
+    # Format metrics for display
+    rmse_val = metrics.get('rmse', 0.0)
+    r2_val = metrics.get('r2', 0.0)
+    trained_at = metrics.get('trained_at', 'Recently')
+
     st.markdown(f"""
     <div class="glass-card">
         <span class="model-tag">🧠 {data.get("model_name", "AI Model")}</span>
         <div style="margin-top: 15px; font-size: 0.85rem; color: #94a3b8;">
-            📅 Last Trained: <b>{data.get("model_metrics", {}).get("trained_at", "N/A")}</b>
+            📅 Last Trained: <b>{trained_at}</b>
         </div>
         <div style="margin-top: 15px; display: flex; justify-content: space-between; align-items: flex-end;">
             <div>
                 <div style="color: #94a3b8; font-size: 0.95rem; margin-bottom: 4px;">Root Mean Square Error</div>
-                <div style="font-size: 2.5rem; font-weight: 800; color: #f8fafc; line-height: 1;">{metrics.get('rmse', '0.0')}</div>
+                <div style="font-size: 2.2rem; font-weight: 800; color: #f8fafc; line-height: 1;">{rmse_val:.4f}</div>
             </div>
             <div style="text-align: right;">
                 <div style="color: #94a3b8; font-size: 0.95rem; margin-bottom: 4px;">R² Score</div>
-                <div style="font-size: 1.8rem; font-weight: 700; color: #38bdf8; line-height: 1;">{metrics.get('r2', '0.0')}</div>
+                <div style="font-size: 1.8rem; font-weight: 700; color: #38bdf8; line-height: 1;">{r2_val:.4f}</div>
             </div>
         </div>
     </div>
