@@ -427,19 +427,25 @@ def load_model_from_registry() -> tuple[Any, Any, list[str], dict]:
     logger.info(f"Loading model '{config.MODEL_NAME}' from Model Registry ...")
 
     try:
+        # Strategy 1: Get the best model based on RMSE
         model_entry = mr.get_best_model(
             name=config.MODEL_NAME,
             metric="rmse",
             direction="min",
         )
     except Exception:
-        # Fallback: get latest version
+        # Strategy 2: Fallback to the latest version if no 'best' exists
         try:
-            model_entry = mr.get_model(name=config.MODEL_NAME)
+            models = mr.get_models(name=config.MODEL_NAME)
+            if not models:
+                raise RuntimeError(f"No versions found for '{config.MODEL_NAME}'")
+            # Sort by version descending and pick the top one
+            model_entry = sorted(models, key=lambda m: m.version, reverse=True)[0]
+            logger.info(f"Fallback: using latest model version {model_entry.version}")
         except Exception as exc:
             raise RuntimeError(
                 f"No model found in registry under '{config.MODEL_NAME}'. "
-                "Run `python src/train.py` first."
+                "Ensure you have run the training pipeline at least once."
             ) from exc
 
     with tempfile.TemporaryDirectory() as tmpdir:
