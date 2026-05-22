@@ -1,10 +1,10 @@
 {
   "model_name": "Linear Regression",
-  "mae": 0.0228,
-  "rmse": 0.0308,
+  "mae": 0.0292,
+  "rmse": 0.0395,
   "r2": 1.0,
-  "cv_rmse_mean": 0.0823,
-  "cv_rmse_std": 0.052,
+  "cv_rmse_mean": 0.1032,
+  "cv_rmse_std": 0.0669,
   "feature_count": 49,
   "feature_names": [
     "pm2_5",
@@ -57,7 +57,7 @@
     "aqi_ewm_24h",
     "aqi_ewm_72h"
   ],
-  "trained_at": "2026-05-21T06:09:57.010849",
+  "trained_at": "2026-05-22T06:06:42.989625",
   "config": {
     "test_size": 0.2,
     "cv_folds": 5,
