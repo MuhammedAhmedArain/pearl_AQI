@@ -282,6 +282,62 @@ def _save_historical(df: pd.DataFrame, city: str) -> None:
     logger.info(f"Raw data saved → {config.RAW_DATA_FILE} ({len(combined)} rows)")
 
 
+def build_latest_feature_payload(
+    city: str,
+    current_weather: dict,
+    current_aqi: dict,
+    historical_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Build the latest complete observation for Feature Store ingestion.
+
+    OpenWeather's historical air-pollution endpoint does not include weather
+    columns, but the Feature Store schema expects the current weather context.
+    This appends the current observation, computes lag/rolling features using
+    recent history, and returns only the newest row.
+    """
+    from src.feature_engineering import add_all_features
+
+    hist = historical_df.copy()
+    if "city" in hist.columns:
+        hist = hist[hist["city"].astype(str).str.lower() == city.lower()]
+
+    weather_fields = {
+        "temp": current_weather.get("temp", 0.0),
+        "humidity": current_weather.get("humidity", 0.0),
+        "wind_speed": current_weather.get("wind_speed", 0.0),
+        "pressure": current_weather.get("pressure", 0.0),
+        "visibility": current_weather.get("visibility", 0.0),
+    }
+    current_row = {
+        "timestamp": pd.Timestamp.utcnow().replace(tzinfo=None),
+        "city": city,
+        "aqi": current_aqi.get("aqi", 0.0),
+        "pm2_5": current_aqi.get("pm2_5", 0.0),
+        "pm10": current_aqi.get("pm10", 0.0),
+        "co": current_aqi.get("co", 0.0),
+        "no": current_aqi.get("no", 0.0),
+        "no2": current_aqi.get("no2", 0.0),
+        "o3": current_aqi.get("o3", 0.0),
+        "so2": current_aqi.get("so2", 0.0),
+        "nh3": current_aqi.get("nh3", 0.0),
+        **weather_fields,
+    }
+
+    context = pd.concat([hist, pd.DataFrame([current_row])], ignore_index=True)
+    context["timestamp"] = pd.to_datetime(context["timestamp"])
+    context = context.sort_values("timestamp").reset_index(drop=True)
+
+    for col, value in weather_fields.items():
+        if col not in context.columns:
+            context[col] = value
+        context[col] = context[col].ffill().bfill().fillna(value)
+
+    latest_row = add_all_features(context).tail(1)
+    latest_row = latest_row.replace([float("inf"), float("-inf")], pd.NA)
+    return latest_row.fillna(0.0)
+
+
 def _load_sample_data() -> pd.DataFrame:
     """Load the bundled sample CSV as fallback."""
     if config.SAMPLE_DATA_FILE.exists():
@@ -344,13 +400,9 @@ if __name__ == "__main__":
 
     if args.push_to_store:
         try:
-            from src.feature_engineering import add_all_features
             from src.feature_store import push_features
 
-            # Prepare data for push: We need enough history for lag features
-            featured_df = add_all_features(hist.copy())
-            latest_row  = featured_df.tail(1)
-
+            latest_row = build_latest_feature_payload(args.city, weather, aqi, hist)
             push_features(latest_row)
             print("🚀 Successfully pushed latest observation to Feature Store.")
         except Exception as e:

@@ -129,6 +129,40 @@ def _run_prediction_sync(city: str, compute_shap: bool) -> dict:
     from src.fetch_data import fetch_city_data
     from src.predict import predict_next_days
 
+    if config.USE_FEATURE_STORE:
+        try:
+            from src.feature_store import get_latest_features
+
+            historical_df = get_latest_features(city, n_rows=120)
+            latest = historical_df.tail(1).iloc[0].to_dict()
+            weather = {
+                "temp": latest.get("temp"),
+                "humidity": latest.get("humidity"),
+                "wind_speed": latest.get("wind_speed"),
+                "pressure": latest.get("pressure"),
+            }
+            aqi = {
+                "aqi": latest.get("aqi"),
+                "pm2_5": latest.get("pm2_5", 0),
+                "pm10": latest.get("pm10", 0),
+                "co": latest.get("co", 0),
+                "no": latest.get("no", 0),
+                "no2": latest.get("no2", 0),
+                "o3": latest.get("o3", 0),
+                "so2": latest.get("so2", 0),
+                "nh3": latest.get("nh3", 0),
+            }
+            return predict_next_days(
+                city, weather, aqi, historical_df, compute_shap=compute_shap
+            )
+        except Exception as exc:
+            logger.warning(
+                "Feature Store inference path failed for '%s': %s. "
+                "Falling back to live fetch.",
+                city,
+                exc,
+            )
+
     weather, aqi, historical_df = fetch_city_data(city, use_cache=True)
     return predict_next_days(
         city, weather, aqi, historical_df, compute_shap=compute_shap

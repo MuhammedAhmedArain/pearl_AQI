@@ -40,6 +40,7 @@ from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.neural_network import MLPRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import cross_val_score, RandomizedSearchCV
+from sklearn.base import BaseEstimator, RegressorMixin
 import xgboost as xgb
 
 import sys
@@ -54,6 +55,74 @@ logger = get_logger(__name__)
 
 # ── Fix random seed for reproducibility ─────────────────────
 np.random.seed(config.RANDOM_SEED)
+
+
+class TensorFlowRegressor(BaseEstimator, RegressorMixin):
+    """Small Keras regressor wrapped with the sklearn estimator interface."""
+
+    def __init__(
+        self,
+        hidden_units: tuple[int, ...] = (64, 32),
+        epochs: int = 30,
+        batch_size: int = 32,
+        learning_rate: float = 0.001,
+        random_state: int = config.RANDOM_SEED,
+    ):
+        self.hidden_units = hidden_units
+        self.epochs = epochs
+        self.batch_size = batch_size
+        self.learning_rate = learning_rate
+        self.random_state = random_state
+        self.model_ = None
+
+    def fit(self, X, y):
+        try:
+            import tensorflow as tf
+        except Exception as exc:
+            logger.warning(
+                "TensorFlow is not installed; using sklearn MLP fallback for "
+                "the TensorFlow candidate. Original error: %s",
+                exc,
+            )
+            self.model_ = MLPRegressor(
+                hidden_layer_sizes=self.hidden_units,
+                max_iter=300,
+                early_stopping=True,
+                random_state=self.random_state,
+            )
+            self.model_.fit(X, y)
+            return self
+
+        tf.random.set_seed(self.random_state)
+        model = tf.keras.Sequential()
+        model.add(tf.keras.layers.Input(shape=(X.shape[1],)))
+        for units in self.hidden_units:
+            model.add(tf.keras.layers.Dense(units, activation="relu"))
+            model.add(tf.keras.layers.Dropout(0.1))
+        model.add(tf.keras.layers.Dense(1))
+        model.compile(
+            optimizer=tf.keras.optimizers.Adam(learning_rate=self.learning_rate),
+            loss="mse",
+            metrics=[tf.keras.metrics.MeanAbsoluteError()],
+        )
+        model.fit(
+            np.asarray(X, dtype=np.float32),
+            np.asarray(y, dtype=np.float32),
+            epochs=self.epochs,
+            batch_size=self.batch_size,
+            validation_split=0.1,
+            verbose=0,
+        )
+        self.model_ = model
+        return self
+
+    def predict(self, X):
+        if self.model_ is None:
+            raise RuntimeError("TensorFlowRegressor must be fitted before prediction.")
+        if hasattr(self.model_, "predict") and not hasattr(self.model_, "layers"):
+            return self.model_.predict(X)
+        preds = self.model_.predict(np.asarray(X, dtype=np.float32), verbose=0)
+        return preds.reshape(-1)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -158,6 +227,12 @@ def get_model_candidates() -> list[dict]:
                 "alpha": [0.0001, 0.001, 0.01],
             },
             "tune": True,
+        },
+        {
+            "name": "TensorFlow Neural Network",
+            "model": TensorFlowRegressor(),
+            "param_grid": None,
+            "tune": False,
         },
     ]
 
@@ -307,6 +382,8 @@ def train_all_models(
         )
 
     # Sort by RMSE (primary), then MAE (secondary)
+    if not results:
+        raise RuntimeError("No model candidates trained successfully.")
     results.sort(key=lambda r: (r["rmse"], r["mae"]))
     return results
 
