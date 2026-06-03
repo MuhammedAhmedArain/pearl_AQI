@@ -27,6 +27,7 @@ from pathlib import Path
 from sklearn.preprocessing import RobustScaler
 
 import sys
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import config  # noqa: E402
@@ -34,10 +35,22 @@ from src.utils import get_logger, timer  # noqa: E402
 
 logger = get_logger(__name__)
 
+FORECAST_TARGET_COLUMN = "target_aqi"
+LEAKAGE_FEATURES = {
+    config.TARGET_COLUMN,
+    FORECAST_TARGET_COLUMN,
+    "timestamp",
+    "city",
+    "aqi_diff_1h",
+    "aqi_diff_3h",
+    "aqi_pct_1h",
+}
+
 
 # ══════════════════════════════════════════════════════════════
 # LOADING
 # ══════════════════════════════════════════════════════════════
+
 
 def load_from_feature_store() -> pd.DataFrame:
     """
@@ -45,6 +58,7 @@ def load_from_feature_store() -> pd.DataFrame:
     Raises FeatureStoreNotConfigured if not configured.
     """
     from src.feature_store import get_training_data
+
     return get_training_data(days=90)
 
 
@@ -60,21 +74,19 @@ def load_raw_data(
       source="feature_store" -- force Feature Store
       source="csv"           -- force CSV
     """
+    if config.REQUIRE_FEATURE_STORE and source != "csv":
+        source = "feature_store"
+
     # -- Feature Store path -------------------------------------------
-    if (
-        source == "feature_store" or
-        (source == "auto" and config.USE_FEATURE_STORE)
-    ):
+    if source == "feature_store" or (source == "auto" and config.USE_FEATURE_STORE):
         try:
             df = load_from_feature_store()
             logger.info(f"Loaded {len(df)} rows from Hopsworks Feature Store.")
             return df
         except Exception as exc:
-            if source == "feature_store":
+            if source == "feature_store" or config.REQUIRE_FEATURE_STORE:
                 raise
-            logger.warning(
-                f"Feature Store unavailable ({exc}). Falling back to CSV."
-            )
+            logger.warning(f"Feature Store unavailable ({exc}). Falling back to CSV.")
 
     # -- CSV path -----------------------------------------------------
     # Prefer processed (already engineered) dataset when present
@@ -101,6 +113,7 @@ def load_raw_data(
 # CLEANING
 # ══════════════════════════════════════════════════════════════
 
+
 def clean_data(df: pd.DataFrame) -> pd.DataFrame:
     """
     Core cleaning steps:
@@ -112,9 +125,7 @@ def clean_data(df: pd.DataFrame) -> pd.DataFrame:
     original_len = len(df)
 
     # Sort and deduplicate
-    subset = (
-        ["timestamp", "city"] if "city" in df.columns else ["timestamp"]
-    )
+    subset = ["timestamp", "city"] if "city" in df.columns else ["timestamp"]
     df = df.drop_duplicates(subset=subset)
     df = df.sort_values("timestamp").reset_index(drop=True)
 
@@ -164,15 +175,11 @@ def handle_missing_values(df: pd.DataFrame) -> pd.DataFrame:
             logger.debug(f"Median imputed '{col}' with {median_val:.3f}")
 
     remaining = df.isna().sum().sum()
-    logger.info(
-        f"Missing value handling complete. Remaining NaNs: {remaining}"
-    )
+    logger.info(f"Missing value handling complete. Remaining NaNs: {remaining}")
     return df
 
 
-def remove_outliers(
-    df: pd.DataFrame, columns: list[str] = None
-) -> pd.DataFrame:
+def remove_outliers(df: pd.DataFrame, columns: list[str] = None) -> pd.DataFrame:
     """
     Remove outliers using IQR method (1.5× IQR fence) for specified columns.
     Default columns: aqi, pm2_5, pm10.
@@ -202,6 +209,7 @@ def remove_outliers(
 # SCALING
 # ══════════════════════════════════════════════════════════════
 
+
 def scale_features(
     X_train: pd.DataFrame,
     X_test: pd.DataFrame,
@@ -218,9 +226,7 @@ def scale_features(
     X_train_sc = X_train.copy()
     X_test_sc = X_test.copy()
 
-    X_train_sc[feature_columns] = scaler.fit_transform(
-        X_train[feature_columns]
-    )
+    X_train_sc[feature_columns] = scaler.fit_transform(X_train[feature_columns])
     X_test_sc[feature_columns] = scaler.transform(X_test[feature_columns])
 
     # Persist scaler
@@ -230,9 +236,74 @@ def scale_features(
     return X_train_sc, X_test_sc, scaler
 
 
+def build_forecast_training_frame(
+    df: pd.DataFrame,
+    forecast_hours: int = config.FORECAST_HOURS,
+) -> pd.DataFrame:
+    """
+    Expand hourly observations into supervised forecast rows.
+
+    Each row at time T is copied once per forecast horizon and trained against
+    AQI at T+horizon. This makes training match the 72-hour dashboard forecast.
+    """
+    if config.TARGET_COLUMN not in df.columns:
+        raise ValueError(f"Missing target column: {config.TARGET_COLUMN}")
+
+    sort_cols = ["timestamp"]
+    if "city" in df.columns:
+        sort_cols = ["city", "timestamp"]
+    ordered = df.sort_values(sort_cols).reset_index(drop=True)
+
+    frames = []
+    for horizon in range(1, forecast_hours + 1):
+        horizon_df = ordered.copy()
+        horizon_df["timestamp_offset"] = horizon
+
+        if "city" in horizon_df.columns:
+            horizon_df[FORECAST_TARGET_COLUMN] = horizon_df.groupby("city")[
+                config.TARGET_COLUMN
+            ].shift(-horizon)
+        else:
+            horizon_df[FORECAST_TARGET_COLUMN] = horizon_df[config.TARGET_COLUMN].shift(
+                -horizon
+            )
+
+        frames.append(horizon_df)
+
+    forecast_df = pd.concat(frames, ignore_index=True)
+    forecast_df = forecast_df.dropna(subset=[FORECAST_TARGET_COLUMN])
+
+    final_sort_cols = [
+        c for c in ["city", "timestamp", "timestamp_offset"] if c in forecast_df.columns
+    ]
+    forecast_df = forecast_df.sort_values(final_sort_cols).reset_index(drop=True)
+
+    logger.info(
+        f"Forecast training frame: {len(forecast_df)} rows, "
+        f"{forecast_hours} horizons, target={FORECAST_TARGET_COLUMN}"
+    )
+    return forecast_df
+
+
+def get_feature_columns(
+    df: pd.DataFrame,
+    target_col: str = config.TARGET_COLUMN,
+) -> list[str]:
+    """Select numeric model inputs while removing target leakage."""
+    excluded = set(LEAKAGE_FEATURES)
+    excluded.add(target_col)
+
+    return [
+        c
+        for c in df.columns
+        if c not in excluded and pd.api.types.is_numeric_dtype(df[c])
+    ]
+
+
 # ══════════════════════════════════════════════════════════════
 # TRAIN / TEST SPLIT
 # ══════════════════════════════════════════════════════════════
+
 
 def split_data(
     df: pd.DataFrame,
@@ -246,10 +317,7 @@ def split_data(
     Returns:
         (X_train, X_test, y_train, y_test)
     """
-    feature_cols = [
-        c for c in df.columns
-        if c not in [target_col, "timestamp", "city"]
-    ]
+    feature_cols = get_feature_columns(df, target_col=target_col)
 
     X = df[feature_cols]
     y = df[target_col]
@@ -269,14 +337,13 @@ def split_data(
 # FULL PIPELINE
 # ══════════════════════════════════════════════════════════════
 
+
 @timer
 def run_preprocessing_pipeline(
     raw_path: Path = config.RAW_DATA_FILE,
     save_processed: bool = True,
     source: str = "auto",
-) -> tuple[
-    pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, list[str], RobustScaler
-]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, list[str], RobustScaler]:
     """
     End-to-end preprocessing pipeline:
       load (FS or CSV) -> clean -> impute -> outlier-cap -> engineer -> split
@@ -316,21 +383,21 @@ def run_preprocessing_pipeline(
         df.to_csv(config.PROCESSED_DATA_FILE, index=False)
         logger.info(f"Processed data saved -> {config.PROCESSED_DATA_FILE}")
 
-    # 7. Train/test split
-    X_train, X_test, y_train, y_test = split_data(df)
+    # 7. Expand historical rows into a true 1-72 hour forecasting dataset
+    forecast_df = build_forecast_training_frame(df)
 
-    # 8. Identify numeric feature columns (exclude target/meta)
-    feature_cols = [
-        c for c in X_train.columns
-        if c not in [config.TARGET_COLUMN, "timestamp", "city"]
-    ]
-
-    # 9. Scale
-    X_train_sc, X_test_sc, scaler = scale_features(
-        X_train, X_test, feature_cols
+    # 8. Train/test split
+    X_train, X_test, y_train, y_test = split_data(
+        forecast_df, target_col=FORECAST_TARGET_COLUMN
     )
 
-    # 10. Persist feature names (needed for future prediction)
+    # 9. Identify numeric feature columns (exclude target/meta/leakage)
+    feature_cols = list(X_train.columns)
+
+    # 10. Scale
+    X_train_sc, X_test_sc, scaler = scale_features(X_train, X_test, feature_cols)
+
+    # 11. Persist feature names (needed for future prediction)
     config.FEATURE_NAMES_PATH.write_text(json.dumps(feature_cols))
     logger.info(
         f"Feature names saved -> {config.FEATURE_NAMES_PATH} "

@@ -26,7 +26,6 @@ Model candidates:
   └────────────────────┴───────────────────────────────────┘
 """
 
-import json
 import datetime
 import warnings
 import numpy as np
@@ -39,19 +38,25 @@ from sklearn.linear_model import LinearRegression, Ridge
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.neural_network import MLPRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from sklearn.model_selection import cross_val_score, RandomizedSearchCV
+from sklearn.model_selection import (
+    TimeSeriesSplit,
+    cross_val_score,
+    RandomizedSearchCV,
+)
 from sklearn.base import BaseEstimator, RegressorMixin
 import xgboost as xgb
 
 import sys
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import config
-from src.utils import get_logger, timer, format_metrics_table, save_json
-from src.preprocess import run_preprocessing_pipeline
+import config  # noqa: E402
+from src.utils import get_logger, timer, format_metrics_table, save_json  # noqa: E402
+from src.preprocess import run_preprocessing_pipeline  # noqa: E402
 
 warnings.filterwarnings("ignore")
 logger = get_logger(__name__)
+MAX_CV_ROWS = 20000
 
 # ── Fix random seed for reproducibility ─────────────────────
 np.random.seed(config.RANDOM_SEED)
@@ -63,7 +68,7 @@ class TensorFlowRegressor(BaseEstimator, RegressorMixin):
     def __init__(
         self,
         hidden_units: tuple[int, ...] = (64, 32),
-        epochs: int = 30,
+        epochs: int = 20,
         batch_size: int = 32,
         learning_rate: float = 0.001,
         random_state: int = config.RANDOM_SEED,
@@ -86,7 +91,7 @@ class TensorFlowRegressor(BaseEstimator, RegressorMixin):
             )
             self.model_ = MLPRegressor(
                 hidden_layer_sizes=self.hidden_units,
-                max_iter=300,
+                max_iter=220,
                 early_stopping=True,
                 random_state=self.random_state,
             )
@@ -129,6 +134,7 @@ class TensorFlowRegressor(BaseEstimator, RegressorMixin):
 # MODEL REGISTRY
 # ══════════════════════════════════════════════════════════════
 
+
 def get_model_candidates() -> list[dict]:
     """
     Return a list of model configuration dicts.
@@ -140,54 +146,54 @@ def get_model_candidates() -> list[dict]:
     """
     return [
         {
-            "name":  "Linear Regression",
+            "name": "Linear Regression",
             "model": LinearRegression(n_jobs=-1),
             "param_grid": None,
-            "tune":  False,
+            "tune": False,
         },
         {
-            "name":  "Ridge Regression",
+            "name": "Ridge Regression",
             "model": Ridge(random_state=config.RANDOM_SEED),
             "param_grid": {
                 "alpha": [0.01, 0.1, 1.0, 10.0, 100.0],
             },
-            "tune":  True,
+            "tune": True,
         },
         {
-            "name":  "Random Forest",
+            "name": "Random Forest",
             "model": RandomForestRegressor(
-                n_estimators=200,
+                n_estimators=120,
                 random_state=config.RANDOM_SEED,
                 n_jobs=-1,
             ),
             "param_grid": {
                 "n_estimators": [100, 200, 300],
-                "max_depth":    [None, 10, 20, 30],
+                "max_depth": [None, 10, 20, 30],
                 "min_samples_split": [2, 5, 10],
-                "max_features":      ["sqrt", "log2"],
+                "max_features": ["sqrt", "log2"],
             },
-            "tune":  True,
+            "tune": True,
         },
         {
-            "name":  "Gradient Boosting",
+            "name": "Gradient Boosting",
             "model": GradientBoostingRegressor(
-                n_estimators=200,
+                n_estimators=120,
                 learning_rate=0.05,
                 max_depth=5,
                 random_state=config.RANDOM_SEED,
             ),
             "param_grid": {
-                "n_estimators":  [100, 200, 300],
+                "n_estimators": [100, 200, 300],
                 "learning_rate": [0.01, 0.05, 0.1],
-                "max_depth":     [3, 5, 7],
-                "subsample":     [0.7, 0.8, 1.0],
+                "max_depth": [3, 5, 7],
+                "subsample": [0.7, 0.8, 1.0],
             },
-            "tune":  True,
+            "tune": True,
         },
         {
-            "name":  "XGBoost",
+            "name": "XGBoost",
             "model": xgb.XGBRegressor(
-                n_estimators=300,
+                n_estimators=200,
                 learning_rate=0.05,
                 max_depth=6,
                 subsample=0.8,
@@ -199,17 +205,17 @@ def get_model_candidates() -> list[dict]:
                 verbosity=0,
             ),
             "param_grid": {
-                "n_estimators":     [200, 300, 500],
-                "learning_rate":    [0.01, 0.05, 0.1],
-                "max_depth":        [4, 6, 8],
-                "subsample":        [0.7, 0.8, 0.9],
+                "n_estimators": [200, 300, 500],
+                "learning_rate": [0.01, 0.05, 0.1],
+                "max_depth": [4, 6, 8],
+                "subsample": [0.7, 0.8, 0.9],
                 "colsample_bytree": [0.7, 0.8, 1.0],
-                "reg_alpha":        [0, 0.1, 0.5],
+                "reg_alpha": [0, 0.1, 0.5],
             },
-            "tune":  True,
+            "tune": True,
         },
         {
-            "name":  "Deep Learning (MLP Neural Net)",
+            "name": "Deep Learning (MLP Neural Net)",
             "model": MLPRegressor(
                 hidden_layer_sizes=(128, 64, 32),
                 activation="relu",
@@ -218,7 +224,7 @@ def get_model_candidates() -> list[dict]:
                 batch_size="auto",
                 learning_rate="adaptive",
                 learning_rate_init=0.001,
-                max_iter=500,
+                max_iter=300,
                 early_stopping=True,
                 random_state=config.RANDOM_SEED,
             ),
@@ -241,6 +247,7 @@ def get_model_candidates() -> list[dict]:
 # EVALUATION
 # ══════════════════════════════════════════════════════════════
 
+
 def evaluate_model(
     model: Any,
     X_test: pd.DataFrame,
@@ -254,11 +261,27 @@ def evaluate_model(
     """
     y_pred = model.predict(X_test)
 
-    mae  = mean_absolute_error(y_test, y_pred)
+    mae = mean_absolute_error(y_test, y_pred)
     rmse = float(np.sqrt(mean_squared_error(y_test, y_pred)))
-    r2   = r2_score(y_test, y_pred)
+    r2 = r2_score(y_test, y_pred)
 
     return {"mae": round(mae, 4), "rmse": round(rmse, 4), "r2": round(r2, 4)}
+
+
+def sample_for_cross_validation(
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
+    max_rows: int = MAX_CV_ROWS,
+) -> tuple[pd.DataFrame, pd.Series]:
+    """
+    Keep CV fast on horizon-expanded data while preserving temporal coverage.
+    Final model fitting and hold-out evaluation still use the full dataset.
+    """
+    if len(X_train) <= max_rows:
+        return X_train, y_train
+
+    idx = np.linspace(0, len(X_train) - 1, max_rows, dtype=int)
+    return X_train.iloc[idx], y_train.iloc[idx]
 
 
 def cross_validate_model(
@@ -271,22 +294,29 @@ def cross_validate_model(
     Run k-fold cross-validation and return mean/std of CV RMSE.
     Uses negative MSE scoring (sklearn convention) then converts.
     """
+    X_cv, y_cv = sample_for_cross_validation(X_train, y_train)
+    n_splits = min(cv, max(2, len(X_cv) // 5000))
+    splitter = TimeSeriesSplit(n_splits=n_splits)
+
     scores = cross_val_score(
-        model, X_train, y_train,
+        model,
+        X_cv,
+        y_cv,
         scoring="neg_root_mean_squared_error",
-        cv=cv,
+        cv=splitter,
         n_jobs=-1,
     )
     cv_rmse = -scores  # negate to get positive RMSE
     return {
         "cv_rmse_mean": round(float(cv_rmse.mean()), 4),
-        "cv_rmse_std":  round(float(cv_rmse.std()),  4),
+        "cv_rmse_std": round(float(cv_rmse.std()), 4),
     }
 
 
 # ══════════════════════════════════════════════════════════════
 # HYPERPARAMETER TUNING
 # ══════════════════════════════════════════════════════════════
+
 
 def tune_model(
     model: Any,
@@ -312,8 +342,7 @@ def tune_model(
     )
     search.fit(X_train, y_train)
     logger.info(
-        f"  Best params: {search.best_params_} | "
-        f"CV RMSE: {-search.best_score_:.4f}"
+        f"  Best params: {search.best_params_} | " f"CV RMSE: {-search.best_score_:.4f}"
     )
     return search.best_estimator_
 
@@ -321,6 +350,7 @@ def tune_model(
 # ══════════════════════════════════════════════════════════════
 # TRAINING LOOP
 # ══════════════════════════════════════════════════════════════
+
 
 @timer
 def train_all_models(
@@ -339,7 +369,7 @@ def train_all_models(
         List of result dicts (one per model), sorted by RMSE ascending.
     """
     candidates = get_model_candidates()
-    results    = []
+    results = []
 
     logger.info("=" * 60)
     logger.info(f"Training {len(candidates)} models …")
@@ -353,7 +383,7 @@ def train_all_models(
 
         # ── Optional hyperparameter tuning ───────────────────
         if tune_hyperparams and cfg["tune"] and cfg["param_grid"]:
-            logger.info(f"  Tuning hyperparameters (RandomizedSearchCV) …")
+            logger.info("  Tuning hyperparameters (RandomizedSearchCV) …")
             model = tune_model(model, cfg["param_grid"], X_train, y_train)
         else:
             model.fit(X_train, y_train)
@@ -365,13 +395,13 @@ def train_all_models(
         metrics = evaluate_model(model, X_test, y_test)
 
         result = {
-            "model_name":    name,
-            "model_object":  model,
-            "mae":           metrics["mae"],
-            "rmse":          metrics["rmse"],
-            "r2":            metrics["r2"],
-            "cv_rmse_mean":  cv_scores["cv_rmse_mean"],
-            "cv_rmse_std":   cv_scores["cv_rmse_std"],
+            "model_name": name,
+            "model_object": model,
+            "mae": metrics["mae"],
+            "rmse": metrics["rmse"],
+            "r2": metrics["r2"],
+            "cv_rmse_mean": cv_scores["cv_rmse_mean"],
+            "cv_rmse_std": cv_scores["cv_rmse_std"],
         }
         results.append(result)
 
@@ -391,6 +421,7 @@ def train_all_models(
 # ══════════════════════════════════════════════════════════════
 # BEST MODEL SELECTION & PERSISTENCE
 # ══════════════════════════════════════════════════════════════
+
 
 def select_and_save_best_model(
     results: list[dict],
@@ -417,18 +448,18 @@ def select_and_save_best_model(
 
     # Build metadata dict
     metadata = {
-        "model_name":     best["model_name"],
-        "mae":            best["mae"],
-        "rmse":           best["rmse"],
-        "r2":             best["r2"],
-        "cv_rmse_mean":   best["cv_rmse_mean"],
-        "cv_rmse_std":    best["cv_rmse_std"],
-        "feature_count":  len(feature_names),
-        "feature_names":  feature_names,
-        "trained_at":     datetime.datetime.utcnow().isoformat(),
+        "model_name": best["model_name"],
+        "mae": best["mae"],
+        "rmse": best["rmse"],
+        "r2": best["r2"],
+        "cv_rmse_mean": best["cv_rmse_mean"],
+        "cv_rmse_std": best["cv_rmse_std"],
+        "feature_count": len(feature_names),
+        "feature_names": feature_names,
+        "trained_at": datetime.datetime.utcnow().isoformat(),
         "config": {
-            "test_size":   config.TEST_SIZE,
-            "cv_folds":    config.CV_FOLDS,
+            "test_size": config.TEST_SIZE,
+            "cv_folds": config.CV_FOLDS,
             "random_seed": config.RANDOM_SEED,
         },
     }
@@ -439,6 +470,7 @@ def select_and_save_best_model(
     if config.USE_FEATURE_STORE:
         try:
             from src.feature_store import save_model_to_registry
+
             save_model_to_registry(
                 model=best["model_object"],
                 scaler=scaler,
@@ -447,24 +479,30 @@ def select_and_save_best_model(
             )
             logger.info("   Model saved to Hopsworks Model Registry.")
         except Exception as exc:
+            if config.REQUIRE_FEATURE_STORE:
+                raise
             logger.warning(f"   Model Registry save failed (non-fatal): {exc}")
     else:
+        if config.REQUIRE_FEATURE_STORE:
+            raise RuntimeError(
+                "REQUIRE_FEATURE_STORE=true but Hopsworks is not configured. "
+                "Set HOPSWORKS_API_KEY before running the training pipeline."
+            )
         logger.info("   Hopsworks not configured - model saved locally only.")
 
     return best
-
 
 
 def save_comparison_table(results: list[dict]) -> None:
     """Save model comparison results to CSV and print to console."""
     rows = [
         {
-            "model_name":   r["model_name"],
-            "mae":          r["mae"],
-            "rmse":         r["rmse"],
-            "r2":           r["r2"],
+            "model_name": r["model_name"],
+            "mae": r["mae"],
+            "rmse": r["rmse"],
+            "r2": r["r2"],
             "cv_rmse_mean": r["cv_rmse_mean"],
-            "cv_rmse_std":  r["cv_rmse_std"],
+            "cv_rmse_std": r["cv_rmse_std"],
         }
         for r in results
     ]
@@ -484,6 +522,7 @@ def save_comparison_table(results: list[dict]) -> None:
 # FULL TRAINING PIPELINE
 # ══════════════════════════════════════════════════════════════
 
+
 @timer
 def run_training_pipeline(tune_hyperparams: bool = True) -> dict:
     """
@@ -499,7 +538,10 @@ def run_training_pipeline(tune_hyperparams: bool = True) -> dict:
     logger.info("🚀 Starting Pearls AQI Predictor training pipeline …")
 
     # 1. Preprocess
-    X_train, X_test, y_train, y_test, feature_names, scaler = run_preprocessing_pipeline()
+    source = "feature_store" if config.REQUIRE_FEATURE_STORE else "auto"
+    X_train, X_test, y_train, y_test, feature_names, scaler = (
+        run_preprocessing_pipeline(source=source)
+    )
 
     # 2. Align feature columns
     feature_cols = [c for c in X_train.columns if c in feature_names]
@@ -507,7 +549,9 @@ def run_training_pipeline(tune_hyperparams: bool = True) -> dict:
     X_te = X_test[feature_cols]
 
     # 3. Train all models
-    results = train_all_models(X_tr, X_te, y_train, y_test, feature_cols, tune_hyperparams)
+    results = train_all_models(
+        X_tr, X_te, y_train, y_test, feature_cols, tune_hyperparams
+    )
 
     # 4. Save comparison table
     save_comparison_table(results)
@@ -515,13 +559,12 @@ def run_training_pipeline(tune_hyperparams: bool = True) -> dict:
     # 5. Select and save best model (local + Model Registry)
     best = select_and_save_best_model(results, feature_cols, scaler=scaler)
 
-
     logger.info("\n✅ Training pipeline complete!")
     return {
         "model_name": best["model_name"],
-        "mae":        best["mae"],
-        "rmse":       best["rmse"],
-        "r2":         best["r2"],
+        "mae": best["mae"],
+        "rmse": best["rmse"],
+        "r2": best["r2"],
     }
 
 
@@ -534,8 +577,9 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Train Pearls AQI Predictor models.")
     parser.add_argument(
-        "--no-tune", action="store_true",
-        help="Skip hyperparameter tuning (faster but less accurate)"
+        "--no-tune",
+        action="store_true",
+        help="Skip hyperparameter tuning (faster but less accurate)",
     )
     args = parser.parse_args()
 

@@ -30,6 +30,7 @@ from typing import Any
 from datetime import datetime, timedelta
 
 import sys
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import config  # noqa: E402
@@ -43,8 +44,10 @@ logger = get_logger(__name__)
 # EXCEPTIONS
 # ══════════════════════════════════════════════════════════════
 
+
 class FeatureStoreNotConfigured(RuntimeError):
     """Raised when HOPSWORKS_API_KEY is not set or is a placeholder."""
+
     pass
 
 
@@ -73,9 +76,9 @@ def _connect() -> tuple:
     if _project is None:
         try:
             import hopsworks
+
             logger.info(
-                f"Connecting to Hopsworks project "
-                f"'{config.HOPSWORKS_PROJECT}' ..."
+                f"Connecting to Hopsworks project " f"'{config.HOPSWORKS_PROJECT}' ..."
             )
             _project = hopsworks.login(
                 host=config.HOPSWORKS_HOST,
@@ -116,11 +119,26 @@ REQUIRED_COLUMNS = [
     "timestamp",
     "aqi",
     # raw weather
-    "temp", "humidity", "wind_speed", "pressure", "visibility",
+    "temp",
+    "humidity",
+    "wind_speed",
+    "pressure",
+    "visibility",
     # raw pollutants
-    "pm2_5", "pm10", "co", "no", "no2", "o3", "so2", "nh3",
+    "pm2_5",
+    "pm10",
+    "co",
+    "no",
+    "no2",
+    "o3",
+    "so2",
+    "nh3",
     # time features
-    "hour", "day_of_week", "day_of_month", "month", "is_weekend",
+    "hour",
+    "day_of_week",
+    "day_of_month",
+    "month",
+    "is_weekend",
 ]
 
 
@@ -135,18 +153,14 @@ def _prepare_df_for_hopsworks(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
     # Normalise column names
-    df.columns = [
-        c.lower().replace(" ", "_").replace("-", "_") for c in df.columns
-    ]
+    df.columns = [c.lower().replace(" ", "_").replace("-", "_") for c in df.columns]
 
     # Ensure timestamp is datetime
     if "timestamp" in df.columns:
         df["timestamp"] = pd.to_datetime(df["timestamp"])
         # Strip timezone info (make naive UTC)
         if df["timestamp"].dt.tz is not None:
-            df["timestamp"] = (
-                df["timestamp"].dt.tz_convert("UTC").dt.tz_localize(None)
-            )
+            df["timestamp"] = df["timestamp"].dt.tz_convert("UTC").dt.tz_localize(None)
 
     # Drop rows missing primary keys
     pk_cols = [c for c in ["city", "timestamp"] if c in df.columns]
@@ -165,6 +179,7 @@ def _prepare_df_for_hopsworks(df: pd.DataFrame) -> pd.DataFrame:
 # ══════════════════════════════════════════════════════════════
 # FEATURE GROUP — GET OR CREATE
 # ══════════════════════════════════════════════════════════════
+
 
 def get_or_create_feature_group():
     """
@@ -203,12 +218,11 @@ def get_or_create_feature_group():
         name=config.FEATURE_GROUP_NAME,
         version=config.FEATURE_GROUP_VERSION,
         description=(
-            "Hourly AQI observations + engineered features "
-            "for Pearls AQI Predictor"
+            "Hourly AQI observations + engineered features " "for Pearls AQI Predictor"
         ),
         primary_key=["city", "timestamp"],
         event_time="timestamp",
-        online_enabled=False,          # Offline-only (saves cost)
+        online_enabled=False,  # Offline-only (saves cost)
     )
     logger.info(f"Feature group created: {fg.name} v{fg.version}")
     return fg
@@ -217,6 +231,7 @@ def get_or_create_feature_group():
 # ══════════════════════════════════════════════════════════════
 # PUSH FEATURES
 # ══════════════════════════════════════════════════════════════
+
 
 def push_features(df: pd.DataFrame) -> None:
     """
@@ -231,14 +246,13 @@ def push_features(df: pd.DataFrame) -> None:
     df_ready = _prepare_df_for_hopsworks(df)
 
     fg.insert(df_ready, write_options={"wait_for_job": False})
-    logger.info(
-        f"Feature Store: inserted {len(df_ready)} rows into '{fg.name}'."
-    )
+    logger.info(f"Feature Store: inserted {len(df_ready)} rows into '{fg.name}'.")
 
 
 # ══════════════════════════════════════════════════════════════
 # FETCH TRAINING DATA
 # ══════════════════════════════════════════════════════════════
+
 
 def get_training_data(days: int = 90) -> pd.DataFrame:
     """
@@ -248,9 +262,7 @@ def get_training_data(days: int = 90) -> pd.DataFrame:
     Raises FeatureStoreNotConfigured if Hopsworks is not set up.
     """
     fs = get_feature_store()
-    logger.info(
-        f"Fetching last {days} days of training data from Feature Store ..."
-    )
+    logger.info(f"Fetching last {days} days of training data from Feature Store ...")
 
     fg = get_or_create_feature_group()
 
@@ -317,6 +329,7 @@ def get_training_data(days: int = 90) -> pd.DataFrame:
 # FETCH LATEST FEATURES (for inference)
 # ══════════════════════════════════════════════════════════════
 
+
 def get_latest_features(city: str, n_rows: int = 48) -> pd.DataFrame:
     """
     Fetch the most recent `n_rows` feature rows for a given city.
@@ -353,6 +366,7 @@ def get_latest_features(city: str, n_rows: int = 48) -> pd.DataFrame:
 # MODEL REGISTRY — SAVE
 # ══════════════════════════════════════════════════════════════
 
+
 def save_model_to_registry(
     model: Any,
     scaler: Any,
@@ -370,9 +384,7 @@ def save_model_to_registry(
       - model_metadata.json
     """
     mr = get_model_registry()
-    logger.info(
-        f"Saving model '{metadata.get('model_name')}' to Model Registry ..."
-    )
+    logger.info(f"Saving model '{metadata.get('model_name')}' to Model Registry ...")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
@@ -412,6 +424,7 @@ def save_model_to_registry(
 # ══════════════════════════════════════════════════════════════
 # MODEL REGISTRY — LOAD
 # ══════════════════════════════════════════════════════════════
+
 
 def load_model_from_registry() -> tuple[Any, Any, list[str], dict]:
     """
@@ -456,15 +469,9 @@ def load_model_from_registry() -> tuple[Any, Any, list[str], dict]:
         scaler_file = model_path / "scaler.pkl"
         scaler = joblib.load(scaler_file) if scaler_file.exists() else None
         fn_file = model_path / "feature_names.json"
-        feature_names = (
-            json.loads(fn_file.read_text()) if fn_file.exists() else []
-        )
+        feature_names = json.loads(fn_file.read_text()) if fn_file.exists() else []
         meta_file = model_path / "model_metadata.json"
-        metadata = (
-            json.loads(meta_file.read_text()) if meta_file.exists() else {}
-        )
+        metadata = json.loads(meta_file.read_text()) if meta_file.exists() else {}
 
-    logger.info(
-        f"Loaded model from Registry: {metadata.get('model_name', 'Unknown')}"
-    )
+    logger.info(f"Loaded model from Registry: {metadata.get('model_name', 'Unknown')}")
     return model, scaler, feature_names, metadata

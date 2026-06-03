@@ -6,13 +6,12 @@ import sys
 import time
 import requests
 import pandas as pd
-import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import config
+import config  # noqa: E402
 
 # ── Page Config ──────────────────────────────────────────────
 st.set_page_config(
@@ -23,7 +22,8 @@ st.set_page_config(
 )
 
 # ── Custom CSS ───────────────────────────────────────────────
-st.markdown("""
+st.markdown(
+    """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
 
@@ -101,7 +101,7 @@ div[data-testid="stToolbar"] {visibility: hidden;}
 .alert-warning {
     background: linear-gradient(135deg, #9a3412, #c2410c);
     border-radius: 16px; padding: 20px; color: white; font-weight: 600;
-    box-shadow: 0 4px 20px rgba(194, 65, 12, 0.4); 
+    box-shadow: 0 4px 20px rgba(194, 65, 12, 0.4);
     border-left: 8px solid #f97316; font-size: 1.1rem;
 }
 
@@ -119,7 +119,7 @@ div[data-testid="stToolbar"] {visibility: hidden;}
 
 .model-tag {
     display: inline-block; background: rgba(56, 189, 248, 0.15);
-    color: #38bdf8; padding: 6px 16px; border-radius: 30px; 
+    color: #38bdf8; padding: 6px 16px; border-radius: 30px;
     font-weight: 700; font-size: 0.95rem; border: 1px solid rgba(56, 189, 248, 0.3);
 }
 
@@ -127,126 +127,246 @@ div[data-testid="stToolbar"] {visibility: hidden;}
 .stSelectbox > div > div { background-color: rgba(30, 41, 59, 0.8) !important; border-radius: 12px; color: white; }
 .stButton > button { border-radius: 12px !important; height: 46px; font-weight: 600; }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 # ── API & Data Helpers ─────────────────────────────────────────
 
 API_BASE = f"http://localhost:{config.API_PORT}"
 
+
 @st.cache_data(ttl=config.CACHE_TTL_SECONDS)
-def get_prediction(city: str, shap: bool = True) -> dict | None:
+def get_model_info() -> dict:
+    local_metadata = {}
+    api_metadata = {}
+
     try:
-        resp = requests.get(f"{API_BASE}/predict", params={"city": city, "shap": shap}, timeout=60)
+        from src.utils import load_json
+
+        if config.MODEL_METADATA_PATH.exists():
+            local_metadata = load_json(config.MODEL_METADATA_PATH)
+    except Exception:
+        local_metadata = {}
+
+    try:
+        resp = requests.get(f"{API_BASE}/model/info", timeout=8)
+        resp.raise_for_status()
+        api_metadata = resp.json()
+    except Exception:
+        api_metadata = {}
+
+    if not api_metadata:
+        return local_metadata
+    if not local_metadata:
+        return api_metadata
+
+    api_trained_at = str(api_metadata.get("trained_at", ""))
+    local_trained_at = str(local_metadata.get("trained_at", ""))
+    return api_metadata if api_trained_at >= local_trained_at else local_metadata
+
+
+@st.cache_data(ttl=config.CACHE_TTL_SECONDS)
+def get_prediction(
+    city: str,
+    shap: bool = False,
+    model_trained_at: str = "",
+) -> dict | None:
+    try:
+        resp = requests.get(
+            f"{API_BASE}/predict",
+            params={"city": city, "shap": shap},
+            timeout=15,
+        )
         resp.raise_for_status()
         return resp.json()
     except Exception:
         try:
             from src.fetch_data import fetch_city_data
             from src.predict import predict_next_days
+
             weather, aqi, hist = fetch_city_data(city, use_cache=True)
             return predict_next_days(city, weather, aqi, hist, compute_shap=shap)
         except Exception as e:
             st.error(f"Prediction failed: {e}")
             return None
 
+
+def apply_model_metadata(data: dict, metadata: dict) -> dict:
+    if not metadata:
+        return data
+
+    data = data.copy()
+    data["model_name"] = metadata.get("model_name", data.get("model_name"))
+    metrics = data.get("model_metrics", {}).copy()
+    for key in ["mae", "rmse", "r2", "trained_at"]:
+        if key in metadata:
+            metrics[key] = metadata[key]
+    data["model_metrics"] = metrics
+    return data
+
+
 @st.cache_data(ttl=3600)
 def get_historical_data(city: str) -> pd.DataFrame:
     try:
         from src.fetch_data import fetch_city_data
+
         _, _, hist = fetch_city_data(city, use_cache=True)
         return hist
     except Exception:
         return pd.DataFrame()
 
+
 def get_aqi_category_class(aqi: float) -> str:
-    if aqi <= 50: return "bg-good"
-    elif aqi <= 100: return "bg-moderate"
-    elif aqi <= 150: return "bg-sensitive"
-    elif aqi <= 200: return "bg-unhealthy"
-    elif aqi <= 300: return "bg-very"
-    else: return "bg-haz"
+    if aqi <= 50:
+        return "bg-good"
+    elif aqi <= 100:
+        return "bg-moderate"
+    elif aqi <= 150:
+        return "bg-sensitive"
+    elif aqi <= 200:
+        return "bg-unhealthy"
+    elif aqi <= 300:
+        return "bg-very"
+    else:
+        return "bg-haz"
+
 
 # ── Plotly Charts ──────────────────────────────────────────────
 
-def combined_trend_chart(hist_df: pd.DataFrame, daily_preds: list[dict], current_aqi: float) -> go.Figure:
+
+def combined_trend_chart(
+    hist_df: pd.DataFrame, daily_preds: list[dict], current_aqi: float
+) -> go.Figure:
     fig = go.Figure()
-    
+
     # 1. Historical Data
     if not hist_df.empty and "timestamp" in hist_df.columns:
-        df = hist_df.tail(48) # last 48 hours for better visual scale
-        fig.add_trace(go.Scatter(
-            x=pd.to_datetime(df["timestamp"]), y=df["aqi"],
-            mode="lines",
-            line=dict(color="#94a3b8", width=2, shape="spline"),
-            name="Historical AQI",
-            fill="tozeroy",
-            fillcolor="rgba(148, 163, 184, 0.08)",
-            hovertemplate="<b>Date</b>: %{x}<br><b>AQI</b>: %{y:.0f}<extra></extra>"
-        ))
+        df = hist_df.tail(48)  # last 48 hours for better visual scale
+        fig.add_trace(
+            go.Scatter(
+                x=pd.to_datetime(df["timestamp"]),
+                y=df["aqi"],
+                mode="lines",
+                line=dict(color="#94a3b8", width=2, shape="spline"),
+                name="Historical AQI",
+                fill="tozeroy",
+                fillcolor="rgba(148, 163, 184, 0.08)",
+                hovertemplate="<b>Date</b>: %{x}<br><b>AQI</b>: %{y:.0f}<extra></extra>",
+            )
+        )
         last_date = pd.to_datetime(df["timestamp"]).iloc[-1]
     else:
         last_date = pd.Timestamp.now()
-        
+
     # 2. Predicted Data
     pred_dates = [last_date] + [pd.to_datetime(d["date"]) for d in daily_preds]
     pred_vals = [current_aqi] + [d["aqi_mean"] for d in daily_preds]
-    
-    fig.add_trace(go.Scatter(
-        x=pred_dates, y=pred_vals,
-        mode="lines+markers",
-        line=dict(color="#38bdf8", width=4, shape="spline", dash="dot"),
-        marker=dict(size=12, color="#818cf8", line=dict(color="#0f172a", width=3)),
-        name="Predicted Average",
-        hovertemplate="<b>Date</b>: %{x|%b %d}<br><b>Predicted AQI</b>: %{y:.0f}<extra></extra>"
-    ))
-    
+
+    fig.add_trace(
+        go.Scatter(
+            x=pred_dates,
+            y=pred_vals,
+            mode="lines+markers",
+            line=dict(color="#38bdf8", width=4, shape="spline", dash="dot"),
+            marker=dict(size=12, color="#818cf8", line=dict(color="#0f172a", width=3)),
+            name="Predicted Average",
+            hovertemplate="<b>Date</b>: %{x|%b %d}<br><b>Predicted AQI</b>: %{y:.0f}<extra></extra>",
+        )
+    )
+
     # Thresholds
-    fig.add_hline(y=150, line_dash="dash", line_color="#f97316", opacity=0.4, annotation_text="Unhealthy (Sensitive)", annotation_font_color="#f97316")
-    fig.add_hline(y=200, line_dash="dash", line_color="#ef4444", opacity=0.4, annotation_text="Unhealthy", annotation_font_color="#ef4444")
-    
+    fig.add_hline(
+        y=150,
+        line_dash="dash",
+        line_color="#f97316",
+        opacity=0.4,
+        annotation_text="Unhealthy (Sensitive)",
+        annotation_font_color="#f97316",
+    )
+    fig.add_hline(
+        y=200,
+        line_dash="dash",
+        line_color="#ef4444",
+        opacity=0.4,
+        annotation_text="Unhealthy",
+        annotation_font_color="#ef4444",
+    )
+
     fig.update_layout(
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font_color="#cbd5e1",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font_color="#cbd5e1",
         xaxis=dict(showgrid=False, title="", tickfont=dict(size=11)),
-        yaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.06)", title="AQI Level"),
-        margin=dict(t=20, b=20, l=40, r=20), height=380,
-        hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="right", x=1)
+        yaxis=dict(
+            showgrid=True, gridcolor="rgba(255,255,255,0.06)", title="AQI Level"
+        ),
+        margin=dict(t=20, b=20, l=40, r=20),
+        height=380,
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="right", x=1),
     )
     return fig
 
+
 def modern_shap_chart(top_features: list[dict]) -> go.Figure:
-    if not top_features: return go.Figure()
+    if not top_features:
+        return go.Figure()
     feats = [f["feature"].replace("_", " ").title() for f in top_features[:7]][::-1]
-    vals  = [f["importance"] for f in top_features[:7]][::-1]
-    
-    fig = go.Figure(go.Bar(
-        x=vals, y=feats, orientation="h",
-        marker=dict(
-            color=vals,
-            colorscale="Purp",
-            line=dict(color="rgba(0,0,0,0)", width=0)
-        ),
-        hovertemplate="<b>%{y}</b><br>Impact: %{x:.4f}<extra></extra>"
-    ))
+    vals = [f["importance"] for f in top_features[:7]][::-1]
+
+    fig = go.Figure(
+        go.Bar(
+            x=vals,
+            y=feats,
+            orientation="h",
+            marker=dict(
+                color=vals, colorscale="Purp", line=dict(color="rgba(0,0,0,0)", width=0)
+            ),
+            hovertemplate="<b>%{y}</b><br>Impact: %{x:.4f}<extra></extra>",
+        )
+    )
     fig.update_layout(
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font_color="#cbd5e1",
-        xaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.06)", title="Impact on Prediction"),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font_color="#cbd5e1",
+        xaxis=dict(
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.06)",
+            title="Impact on Prediction",
+        ),
         yaxis=dict(showgrid=False, tickfont=dict(size=12, color="#e2e8f0")),
-        margin=dict(t=10, b=30, l=10, r=20), height=380,
+        margin=dict(t=10, b=30, l=10, r=20),
+        height=380,
     )
     return fig
+
 
 # ── UI Layout Assembly ─────────────────────────────────────────
 
 # Header Title
-st.markdown("<div class='title-text'>🌍 AQI Forecast Dashboard</div>", unsafe_allow_html=True)
-st.markdown("<div class='subtitle-text'>Real-time Air Quality Monitoring & 3-Day Prediction Powered by Machine Learning</div>", unsafe_allow_html=True)
+st.markdown(
+    "<div class='title-text'>🌍 AQI Forecast Dashboard</div>", unsafe_allow_html=True
+)
+st.markdown(
+    "<div class='subtitle-text'>Real-time Air Quality Monitoring & 3-Day Prediction Powered by Machine Learning</div>",
+    unsafe_allow_html=True,
+)
 
 # Controls
-col_city, col_btn, col_space = st.columns([2, 1, 6])
+col_city, col_shap_toggle, col_btn, col_space = st.columns([2, 1.2, 1.2, 5.6])
 with col_city:
-    city = st.selectbox("Location", options=config.SUPPORTED_CITIES, label_visibility="collapsed")
+    city = st.selectbox(
+        "Location", options=config.SUPPORTED_CITIES, label_visibility="collapsed"
+    )
+with col_shap_toggle:
+    show_shap = st.checkbox("SHAP", value=False, help="Compute feature importance")
 with col_btn:
-    if st.button("🔄 Sync with Cloud", use_container_width=True, help="Force refresh data and reload latest model from Registry"):
+    if st.button(
+        "🔄 Sync with Cloud",
+        use_container_width=True,
+        help="Force refresh data and reload latest model from Registry",
+    ):
         st.cache_data.clear()
         st.success("Cache cleared! Reloading...")
         time.sleep(0.5)
@@ -256,7 +376,13 @@ st.markdown("<br>", unsafe_allow_html=True)
 
 # Fetch Data
 with st.spinner("Analyzing atmospheric data models..."):
-    data = get_prediction(city, shap=True)
+    model_info = get_model_info()
+    data = get_prediction(
+        city,
+        shap=show_shap,
+        model_trained_at=model_info.get("trained_at", ""),
+    )
+    data = apply_model_metadata(data, model_info) if data else None
     hist_df = get_historical_data(city)
 
 if not data:
@@ -266,33 +392,75 @@ if not data:
 # SECTION 3: AQI CATEGORY + ALERT
 c_aqi = data["current_aqi"]
 if c_aqi > 200:
-    st.markdown(f"<div class='alert-danger'>🚨 DANGER ALERT: Current AQI is {c_aqi:.0f} ({data['current_category']}). Air quality is extremely hazardous! Limit outdoor exposure immediately.</div><br>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div class='alert-danger'>🚨 DANGER ALERT: Current AQI is {c_aqi:.0f} ({data['current_category']}). Air quality is extremely hazardous! Limit outdoor exposure immediately.</div><br>",
+        unsafe_allow_html=True,
+    )
 elif c_aqi > 150:
-    st.markdown(f"<div class='alert-warning'>⚠️ WARNING ALERT: Current AQI is {c_aqi:.0f} ({data['current_category']}). Unhealthy air quality. Sensitive groups should wear masks.</div><br>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div class='alert-warning'>⚠️ WARNING ALERT: Current AQI is {c_aqi:.0f} ({data['current_category']}). Unhealthy air quality. Sensitive groups should wear masks.</div><br>",
+        unsafe_allow_html=True,
+    )
 
 # SECTION 1: SUMMARY CARDS
-st.markdown("<h3 style='color: white; margin-bottom: 20px;'>📊 AQI Overview</h3>", unsafe_allow_html=True)
+st.markdown(
+    "<h3 style='color: white; margin-bottom: 20px;'>📊 AQI Overview</h3>",
+    unsafe_allow_html=True,
+)
 c1, c2, c3, c4 = st.columns(4)
+
 
 def render_card(col, title, aqi, date, emoji, cat):
     bg = get_aqi_category_class(aqi)
     with col:
-        st.markdown(f"""
+        st.markdown(
+            f"""
         <div class="aqi-card {bg}">
             <div class="card-title">{title}</div>
             <div class="card-value">{aqi:.0f}</div>
             <div class="card-subtitle">{emoji} {cat}</div>
             <div class="card-details">{date}</div>
         </div>
-        """, unsafe_allow_html=True)
+        """,
+            unsafe_allow_html=True,
+        )
 
-render_card(c1, "CURRENT", data["current_aqi"], "Live Now", data["current_emoji"], data["current_category"])
+
+render_card(
+    c1,
+    "CURRENT",
+    data["current_aqi"],
+    "Live Now",
+    data["current_emoji"],
+    data["current_category"],
+)
 
 days = data.get("daily_predictions", [])
 if len(days) >= 3:
-    render_card(c2, "TOMORROW", days[0]["aqi_mean"], days[0]["date"], days[0]["emoji"], days[0]["category"])
-    render_card(c3, "DAY 2", days[1]["aqi_mean"], days[1]["date"], days[1]["emoji"], days[1]["category"])
-    render_card(c4, "DAY 3", days[2]["aqi_mean"], days[2]["date"], days[2]["emoji"], days[2]["category"])
+    render_card(
+        c2,
+        "TOMORROW",
+        days[0]["aqi_mean"],
+        days[0]["date"],
+        days[0]["emoji"],
+        days[0]["category"],
+    )
+    render_card(
+        c3,
+        "DAY 2",
+        days[1]["aqi_mean"],
+        days[1]["date"],
+        days[1]["emoji"],
+        days[1]["category"],
+    )
+    render_card(
+        c4,
+        "DAY 3",
+        days[2]["aqi_mean"],
+        days[2]["date"],
+        days[2]["emoji"],
+        days[2]["category"],
+    )
 
 st.markdown("<br><br>", unsafe_allow_html=True)
 
@@ -300,13 +468,27 @@ st.markdown("<br><br>", unsafe_allow_html=True)
 col_trend, col_shap = st.columns([6, 4], gap="large")
 
 with col_trend:
-    st.markdown("<h3 style='color: white;'>📈 AQI Trend & Forecast Analysis</h3>", unsafe_allow_html=True)
-    st.plotly_chart(combined_trend_chart(hist_df, days, data["current_aqi"]), use_container_width=True, config={'displayModeBar': False})
+    st.markdown(
+        "<h3 style='color: white;'>📈 AQI Trend & Forecast Analysis</h3>",
+        unsafe_allow_html=True,
+    )
+    st.plotly_chart(
+        combined_trend_chart(hist_df, days, data["current_aqi"]),
+        use_container_width=True,
+        config={"displayModeBar": False},
+    )
 
 with col_shap:
-    st.markdown("<h3 style='color: white;'>🔍 Primary Risk Factors (SHAP)</h3>", unsafe_allow_html=True)
+    st.markdown(
+        "<h3 style='color: white;'>🔍 Primary Risk Factors (SHAP)</h3>",
+        unsafe_allow_html=True,
+    )
     if data.get("shap_explanation", {}).get("top_features"):
-        st.plotly_chart(modern_shap_chart(data["shap_explanation"]["top_features"]), use_container_width=True, config={'displayModeBar': False})
+        st.plotly_chart(
+            modern_shap_chart(data["shap_explanation"]["top_features"]),
+            use_container_width=True,
+            config={"displayModeBar": False},
+        )
     else:
         st.info("Factor analysis unavailable.")
 
@@ -316,14 +498,17 @@ st.markdown("<br><br>", unsafe_allow_html=True)
 col_model, col_exp = st.columns([4, 6], gap="large")
 
 with col_model:
-    st.markdown("<h3 style='color: white;'>🤖 Intelligence Engine</h3>", unsafe_allow_html=True)
+    st.markdown(
+        "<h3 style='color: white;'>🤖 Intelligence Engine</h3>", unsafe_allow_html=True
+    )
     metrics = data.get("model_metrics", {})
     # Format metrics for display
-    rmse_val = metrics.get('rmse', 0.0)
-    r2_val = metrics.get('r2', 0.0)
-    trained_at = metrics.get('trained_at', 'Recently')
+    rmse_val = metrics.get("rmse", 0.0)
+    r2_val = metrics.get("r2", 0.0)
+    trained_at = metrics.get("trained_at", "Recently")
 
-    st.markdown(f"""
+    st.markdown(
+        f"""
     <div class="glass-card">
         <span class="model-tag">🧠 {data.get("model_name", "AI Model")}</span>
         <div style="margin-top: 15px; font-size: 0.85rem; color: #94a3b8;">
@@ -340,11 +525,15 @@ with col_model:
             </div>
         </div>
     </div>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
 with col_exp:
-    st.markdown("<h3 style='color: white;'>💡 Advanced Analytics</h3>", unsafe_allow_html=True)
-    
+    st.markdown(
+        "<h3 style='color: white;'>💡 Advanced Analytics</h3>", unsafe_allow_html=True
+    )
+
     with st.expander("🌤️ Show Detailed Atmospheric Conditions", expanded=False):
         w = data.get("current_weather", {})
         c_cols = st.columns(4)
@@ -352,30 +541,40 @@ with col_exp:
         c_cols[1].metric("Humidity", f"{w.get('humidity', 0)} %")
         c_cols[2].metric("Wind Speed", f"{w.get('wind_speed', 0)} m/s")
         c_cols[3].metric("Pressure", f"{w.get('pressure', 0)} hPa")
-        
+
     with st.expander("🏆 Show Model Training Leaderboard", expanded=False):
         try:
             comp_df = pd.read_csv("models/model_comparison.csv")
-            
+
             # Simple highlighter for deployed model
             deployed = data.get("model_name", "")
+
             def highlight(row):
-                return ['background-color: rgba(56, 189, 248, 0.15)'] * len(row) if row['model_name'] == deployed else [''] * len(row)
-                
+                return (
+                    ["background-color: rgba(56, 189, 248, 0.15)"] * len(row)
+                    if row["model_name"] == deployed
+                    else [""] * len(row)
+                )
+
             st.dataframe(
-                comp_df.style.apply(highlight, axis=1).format({"rmse": "{:.4f}", "mae": "{:.4f}", "r2": "{:.4f}"}),
-                use_container_width=True, hide_index=True
+                comp_df.style.apply(highlight, axis=1).format(
+                    {"rmse": "{:.4f}", "mae": "{:.4f}", "r2": "{:.4f}"}
+                ),
+                use_container_width=True,
+                hide_index=True,
             )
         except Exception:
             st.info("Leaderboard data unavailable locally.")
 
 # Footer
-st.markdown("<br><hr style='border-color: rgba(255,255,255,0.05);'>", unsafe_allow_html=True)
+st.markdown(
+    "<br><hr style='border-color: rgba(255,255,255,0.05);'>", unsafe_allow_html=True
+)
 st.markdown(
     f'<div style="text-align:center;color:#64748b;font-size:0.85rem;padding:20px 0;">'
-    f'Pearls AQI Predictor © 2026 &nbsp;&bull;&nbsp; '
-    f'Data: OpenWeatherMap API &nbsp;&bull;&nbsp; '
+    f"Pearls AQI Predictor © 2026 &nbsp;&bull;&nbsp; "
+    f"Data: OpenWeatherMap API &nbsp;&bull;&nbsp; "
     f'Last updated: {data.get("generated_at", "")[:16]}'
-    f'</div>',
-    unsafe_allow_html=True
+    f"</div>",
+    unsafe_allow_html=True,
 )

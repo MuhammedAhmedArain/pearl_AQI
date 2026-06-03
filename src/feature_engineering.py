@@ -20,10 +20,11 @@ import numpy as np
 from pathlib import Path
 
 import sys
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import config
-from src.utils import get_logger
+import config  # noqa: E402
+from src.utils import get_logger  # noqa: E402
 
 logger = get_logger(__name__)
 
@@ -31,6 +32,7 @@ logger = get_logger(__name__)
 # ══════════════════════════════════════════════════════════════
 # TIME-BASED FEATURES
 # ══════════════════════════════════════════════════════════════
+
 
 def add_time_features(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -46,12 +48,12 @@ def add_time_features(df: pd.DataFrame) -> pd.DataFrame:
 
     ts = pd.to_datetime(df["timestamp"])
 
-    df["hour"]         = ts.dt.hour
-    df["day_of_week"]  = ts.dt.dayofweek       # 0=Monday, 6=Sunday
+    df["hour"] = ts.dt.hour
+    df["day_of_week"] = ts.dt.dayofweek  # 0=Monday, 6=Sunday
     df["day_of_month"] = ts.dt.day
-    df["month"]        = ts.dt.month
-    df["is_weekend"]   = (df["day_of_week"] >= 5).astype(int)
-    df["quarter"]      = ts.dt.quarter
+    df["month"] = ts.dt.month
+    df["is_weekend"] = (df["day_of_week"] >= 5).astype(int)
+    df["quarter"] = ts.dt.quarter
 
     # ── Cyclic encoding ──────────────────────────────────────
     df["hour_sin"] = np.sin(2 * np.pi * df["hour"] / 24)
@@ -68,6 +70,7 @@ def add_time_features(df: pd.DataFrame) -> pd.DataFrame:
 # ══════════════════════════════════════════════════════════════
 # LAG FEATURES
 # ══════════════════════════════════════════════════════════════
+
 
 def add_lag_features(
     df: pd.DataFrame,
@@ -106,6 +109,7 @@ def add_lag_features(
 # ROLLING STATISTICS
 # ══════════════════════════════════════════════════════════════
 
+
 def add_rolling_features(
     df: pd.DataFrame,
     col: str = config.TARGET_COLUMN,
@@ -124,8 +128,7 @@ def add_rolling_features(
             df[col].shift(1).rolling(window=w_hours, min_periods=1).mean()
         )
         df[f"{col}_roll_std_{w}d"] = (
-            df[col].shift(1).rolling(window=w_hours, min_periods=1).std()
-            .fillna(0)
+            df[col].shift(1).rolling(window=w_hours, min_periods=1).std().fillna(0)
         )
         logger.debug(f"Rolling features: {col} × {w}d window")
 
@@ -135,6 +138,7 @@ def add_rolling_features(
 # ══════════════════════════════════════════════════════════════
 # CHANGE RATE / TREND FEATURES
 # ══════════════════════════════════════════════════════════════
+
 
 def add_change_features(
     df: pd.DataFrame,
@@ -156,6 +160,7 @@ def add_change_features(
 # ══════════════════════════════════════════════════════════════
 # POLLUTANT RATIO FEATURES
 # ══════════════════════════════════════════════════════════════
+
 
 def add_pollutant_features(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -179,6 +184,7 @@ def add_pollutant_features(df: pd.DataFrame) -> pd.DataFrame:
 # EXPONENTIAL WEIGHTED MEAN
 # ══════════════════════════════════════════════════════════════
 
+
 def add_ewm_features(
     df: pd.DataFrame,
     col: str = config.TARGET_COLUMN,
@@ -200,6 +206,7 @@ def add_ewm_features(
 # ══════════════════════════════════════════════════════════════
 # MAIN COMBINATOR
 # ══════════════════════════════════════════════════════════════
+
 
 def add_all_features(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -226,6 +233,7 @@ def add_all_features(df: pd.DataFrame) -> pd.DataFrame:
 # FUTURE FEATURE GENERATION (for prediction)
 # ══════════════════════════════════════════════════════════════
 
+
 def generate_future_features(
     history_df: pd.DataFrame,
     forecast_hours: int = config.FORECAST_HOURS,
@@ -244,65 +252,101 @@ def generate_future_features(
 
     # Start from last known timestamp
     last_row = history_df.iloc[-1]
-    last_ts  = pd.Timestamp.now()
+    if "timestamp" in history_df.columns:
+        last_ts = pd.to_datetime(history_df["timestamp"].iloc[-1])
+    else:
+        last_ts = pd.Timestamp.now()
 
     future_rows = []
-    last_aqi    = last_row.get("aqi", 80.0)
+    last_aqi = float(last_row.get("aqi", 80.0))
+    history_aqi = (
+        history_df["aqi"].astype(float).tolist()
+        if "aqi" in history_df.columns
+        else [last_aqi]
+    )
+    recent_slope = 0.0
+    if len(history_aqi) >= 6:
+        recent_slope = float(np.mean(np.diff(history_aqi[-6:])))
+    simulated_aqi_values: list[float] = []
 
     for i in range(1, forecast_hours + 1):
-        future_ts   = last_ts + pd.Timedelta(hours=i)
-        row: dict   = {}
+        future_ts = last_ts + pd.Timedelta(hours=i)
+        row: dict = {}
 
         # ── Calendar features (deterministic) ───────────────
-        row["hour"]         = future_ts.hour
-        row["day_of_week"]  = future_ts.dayofweek
+        row["hour"] = future_ts.hour
+        row["day_of_week"] = future_ts.dayofweek
         row["day_of_month"] = future_ts.day
-        row["month"]        = future_ts.month
-        row["is_weekend"]   = int(future_ts.dayofweek >= 5)
-        row["quarter"]      = future_ts.quarter
+        row["month"] = future_ts.month
+        row["is_weekend"] = int(future_ts.dayofweek >= 5)
+        row["quarter"] = future_ts.quarter
 
         # Cyclic
-        row["hour_sin"]  = np.sin(2 * np.pi * row["hour"]  / 24)
-        row["hour_cos"]  = np.cos(2 * np.pi * row["hour"]  / 24)
+        row["hour_sin"] = np.sin(2 * np.pi * row["hour"] / 24)
+        row["hour_cos"] = np.cos(2 * np.pi * row["hour"] / 24)
         row["month_sin"] = np.sin(2 * np.pi * row["month"] / 12)
         row["month_cos"] = np.cos(2 * np.pi * row["month"] / 12)
-        row["dow_sin"]   = np.sin(2 * np.pi * row["day_of_week"] / 7)
-        row["dow_cos"]   = np.cos(2 * np.pi * row["day_of_week"] / 7)
+        row["dow_sin"] = np.sin(2 * np.pi * row["day_of_week"] / 7)
+        row["dow_cos"] = np.cos(2 * np.pi * row["day_of_week"] / 7)
 
-        # ── Lag features (use last known AQI + time variance) ────────
-        # We add a small sinusodial fluctuation based on hour of day
-        # to ensure the model doesn't see perfectly static inputs.
-        time_variance = 5 * np.sin(2 * np.pi * row["hour"] / 24)
-        sim_aqi = max(10, last_aqi + time_variance)
+        # Use real lag values while they are still available, then extend the
+        # recent trend gently for future-only lag positions.
+        time_variance = 4 * np.sin(2 * np.pi * row["hour"] / 24)
+        trend = np.clip(recent_slope, -2.5, 2.5) * min(i, 24)
+        sim_aqi = float(np.clip(last_aqi + trend + time_variance, 0, 500))
+        simulated_aqi_values.append(sim_aqi)
 
         for lag in config.LAG_PERIODS:
-            row[f"aqi_lag_{lag}"] = sim_aqi
+            relative_idx = i - lag
+            if relative_idx <= 0:
+                hist_idx = len(history_aqi) + relative_idx - 1
+                row[f"aqi_lag_{lag}"] = (
+                    history_aqi[hist_idx] if hist_idx >= 0 else last_aqi
+                )
+            else:
+                row[f"aqi_lag_{lag}"] = simulated_aqi_values[relative_idx - 1]
 
         # ── Rolling features ─────────────────────────────────
         for w in config.ROLLING_WINDOWS:
             col_key = f"aqi_roll_mean_{w}d"
-            row[col_key] = history_df[col_key].iloc[-1] if col_key in history_df.columns else last_aqi
+            row[col_key] = (
+                history_df[col_key].iloc[-1]
+                if col_key in history_df.columns
+                else last_aqi
+            )
             col_key_std = f"aqi_roll_std_{w}d"
-            row[col_key_std] = history_df[col_key_std].iloc[-1] if col_key_std in history_df.columns else 0.0
+            row[col_key_std] = (
+                history_df[col_key_std].iloc[-1]
+                if col_key_std in history_df.columns
+                else 0.0
+            )
 
         # ── Change features ───────────────────────────────────
         row["aqi_diff_1h"] = 0.0
         row["aqi_diff_3h"] = 0.0
-        row["aqi_pct_1h"]  = 0.0
+        row["aqi_pct_1h"] = 0.0
 
         # ── Pollutant lags (use last known) ──────────────────
         for p in ["pm2_5", "pm10", "no2", "o3"]:
             col_key = f"{p}_lag_1"
-            row[col_key] = history_df[col_key].iloc[-1] if col_key in history_df.columns else 0.0
+            row[col_key] = (
+                history_df[col_key].iloc[-1] if col_key in history_df.columns else 0.0
+            )
 
         # ── Pollutant ratios ─────────────────────────────────
-        row["pm_ratio"]      = last_row.get("pm_ratio", 0.6)
-        row["no2_o3_ratio"]  = last_row.get("no2_o3_ratio", 0.5)
+        row["pm_ratio"] = last_row.get("pm_ratio", 0.6)
+        row["no2_o3_ratio"] = last_row.get("no2_o3_ratio", 0.5)
 
         # ── EWM ──────────────────────────────────────────────
-        row["aqi_ewm_12h"] = history_df.get("aqi_ewm_12h", pd.Series([last_aqi])).iloc[-1]
-        row["aqi_ewm_24h"] = history_df.get("aqi_ewm_24h", pd.Series([last_aqi])).iloc[-1]
-        row["aqi_ewm_72h"] = history_df.get("aqi_ewm_72h", pd.Series([last_aqi])).iloc[-1]
+        row["aqi_ewm_12h"] = history_df.get("aqi_ewm_12h", pd.Series([last_aqi])).iloc[
+            -1
+        ]
+        row["aqi_ewm_24h"] = history_df.get("aqi_ewm_24h", pd.Series([last_aqi])).iloc[
+            -1
+        ]
+        row["aqi_ewm_72h"] = history_df.get("aqi_ewm_72h", pd.Series([last_aqi])).iloc[
+            -1
+        ]
 
         # Add raw pollutants (from last known)
         for col in ["pm2_5", "pm10", "co", "no", "no2", "o3", "so2", "nh3"]:
@@ -323,6 +367,7 @@ def generate_future_features(
 
 if __name__ == "__main__":
     import pandas as pd
+
     sample = pd.read_csv(config.SAMPLE_DATA_FILE, parse_dates=["timestamp"])
     engineered = add_all_features(sample)
     print(f"\n✅ Features: {list(engineered.columns)}")

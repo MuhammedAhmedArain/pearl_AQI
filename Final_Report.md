@@ -14,6 +14,8 @@ The feature pipeline in `src/fetch_data.py` fetches current weather and
 pollutant data from OpenWeatherMap. It combines the current observation with
 historical AQI context, computes model-ready features, and can push the latest
 complete row into Hopsworks Feature Store.
+In scheduled production mode, `REQUIRE_FEATURE_STORE=true` makes missing or
+failed Feature Store writes fail the run instead of silently falling back.
 
 Engineered features include:
 
@@ -50,6 +52,8 @@ data. It evaluates multiple model families:
 Models are evaluated with RMSE, MAE, and R2. The best model is selected by
 lowest RMSE. The selected model, scaler, feature schema, and metadata are saved
 locally and can also be published to the Hopsworks Model Registry.
+The daily training workflow runs in strict registry mode, so the selected model
+must be registered successfully for the automated run to pass.
 
 ## 4. Automation
 
@@ -89,6 +93,8 @@ The project includes:
   for the fully serverless path.
 - Local fallback data is included so the app remains demoable without external
   services.
+- SHAP explanations are available on demand in the dashboard to keep normal
+  inference responsive.
 
 ## Conclusion
 

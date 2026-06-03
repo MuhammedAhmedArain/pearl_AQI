@@ -18,13 +18,15 @@ from pathlib import Path
 from typing import Any, Callable
 
 import sys
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import config
+import config  # noqa: E402
 
 
 # ══════════════════════════════════════════════════════════════
 # LOGGING
 # ══════════════════════════════════════════════════════════════
+
 
 def get_logger(name: str) -> logging.Logger:
     """
@@ -40,6 +42,13 @@ def get_logger(name: str) -> logging.Logger:
     logger.setLevel(logging.DEBUG)
 
     fmt = logging.Formatter(config.LOG_FORMAT, datefmt="%Y-%m-%d %H:%M:%S")
+
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
 
     # ── Console handler ──────────────────────────────────────
     ch = logging.StreamHandler()
@@ -61,6 +70,7 @@ def get_logger(name: str) -> logging.Logger:
 # ══════════════════════════════════════════════════════════════
 # DECORATORS
 # ══════════════════════════════════════════════════════════════
+
 
 def timer(func: Callable) -> Callable:
     """Log execution time of a function."""
@@ -86,6 +96,7 @@ def retry(max_attempts: int = 3, delay: float = 2.0, exceptions: tuple = (Except
         delay: Initial delay in seconds (doubles on each retry).
         exceptions: Tuple of exception types to catch.
     """
+
     def decorator(func: Callable) -> Callable:
         logger = get_logger("retry")
 
@@ -110,12 +121,14 @@ def retry(max_attempts: int = 3, delay: float = 2.0, exceptions: tuple = (Except
                     current_delay *= 2  # Exponential back-off
 
         return wrapper
+
     return decorator
 
 
 # ══════════════════════════════════════════════════════════════
 # FILE I/O
 # ══════════════════════════════════════════════════════════════
+
 
 def save_json(data: Any, path: Path) -> None:
     """Serialise data to a JSON file, creating parent directories as needed."""
@@ -141,6 +154,7 @@ def ensure_dir(path: Path) -> Path:
 # AQI HELPERS
 # ══════════════════════════════════════════════════════════════
 
+
 def aqi_category(aqi_value: float) -> dict:
     """Return AQI category metadata dict for a numeric AQI value."""
     return config.get_aqi_category(float(aqi_value))
@@ -157,8 +171,8 @@ def format_metrics_table(results: list[dict]) -> str:
         Formatted ASCII table string.
     """
     header = f"{'Model':<30} {'MAE':>8} {'RMSE':>8} {'R²':>8}"
-    sep    = "-" * len(header)
-    rows   = [header, sep]
+    sep = "-" * len(header)
+    rows = [header, sep]
     for r in results:
         rows.append(
             f"{r['model_name']:<30} {r['mae']:>8.4f} {r['rmse']:>8.4f} {r['r2']:>8.4f}"
@@ -170,6 +184,7 @@ def format_metrics_table(results: list[dict]) -> str:
 # ══════════════════════════════════════════════════════════════
 # CACHE HELPERS
 # ══════════════════════════════════════════════════════════════
+
 
 def get_cache_path(city: str, suffix: str = "json") -> Path:
     """Return a deterministic cache file path for a city."""

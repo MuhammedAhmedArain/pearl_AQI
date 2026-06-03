@@ -34,6 +34,7 @@ jobs:
           HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
           HOPSWORKS_PROJECT: pearlsAQI
           HOPSWORKS_HOST: eu-west.cloud.hopsworks.ai
+          REQUIRE_FEATURE_STORE: "true"
         run: |
           python src/train.py --no-tune
 

@@ -82,6 +82,8 @@ python src/train.py --no-tune
 When Hopsworks is configured, training loads historical data from the Feature
 Store and saves the best model to the Model Registry. If Hopsworks is not
 configured, the project falls back to local CSV/model artifacts for development.
+Set `REQUIRE_FEATURE_STORE=true` in production automation to fail the pipeline
+instead of using local fallback artifacts.
 
 ## GitHub Actions
 
@@ -91,6 +93,10 @@ configured, the project falls back to local CSV/model artifacts for development.
 | `feature-pipeline.yml` | Hourly / manual | Fetch latest AQI/weather and push features |
 | `training-pipeline.yml` | Daily / manual | Retrain and publish model metrics |
 | `backfill.yml` | Manual | Seed historical features |
+
+The scheduled feature and training workflows run with `REQUIRE_FEATURE_STORE=true`,
+so missing Hopsworks credentials or registry failures are treated as failed
+production runs.
 
 ## API Endpoints
 

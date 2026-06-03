@@ -41,4 +41,4 @@ jobs:
           HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
           HOPSWORKS_PROJECT: pearlsAQI
         run: |
-          pytest tests/ -v --tb=short 2>/dev/null || echo "No tests yet - skipping"
+          pytest tests/ -v --tb=short

@@ -21,18 +21,17 @@ import sys
 import time
 import asyncio
 from pathlib import Path
-from typing import Optional
-from datetime import datetime
+from datetime import UTC, datetime
 
-from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import config
-from src.utils import get_logger, load_json, is_cache_valid
+import config  # noqa: E402
+from src.utils import get_logger, load_json  # noqa: E402
 
 logger = get_logger(__name__)
 
@@ -60,8 +59,8 @@ app = FastAPI(
 # ── CORS ─────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # Tighten in production
-    allow_credentials=True,
+    allow_origins=config.CORS_ORIGINS,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -71,42 +70,46 @@ app.add_middleware(
 # RESPONSE MODELS
 # ══════════════════════════════════════════════════════════════
 
+
 class DayForecast(BaseModel):
-    day:       int
-    date:      str
-    aqi_mean:  float
-    aqi_max:   float
-    aqi_min:   float
-    category:  str
-    color:     str
-    emoji:     str
-    alert:     bool
+    day: int
+    date: str
+    aqi_mean: float
+    aqi_max: float
+    aqi_min: float
+    category: str
+    color: str
+    emoji: str
+    alert: bool
+
 
 class PredictionResponse(BaseModel):
-    city:                str
-    current_aqi:         float
-    current_category:    str
-    current_color:       str
-    current_emoji:       str
-    current_alert:       bool
-    current_weather:     dict
-    current_pollutants:  dict
-    daily_predictions:   list[DayForecast]
-    model_name:          str
-    model_metrics:       dict
-    forecast_days:       int
-    generated_at:        str
+    city: str
+    current_aqi: float
+    current_category: str
+    current_color: str
+    current_emoji: str
+    current_alert: bool
+    current_weather: dict
+    current_pollutants: dict
+    daily_predictions: list[DayForecast]
+    model_name: str
+    model_metrics: dict
+    forecast_days: int
+    generated_at: str
+
 
 class HealthResponse(BaseModel):
-    status:       str
+    status: str
     model_loaded: bool
-    api_version:  str
-    timestamp:    str
+    api_version: str
+    timestamp: str
 
 
 # ══════════════════════════════════════════════════════════════
 # STARTUP
 # ══════════════════════════════════════════════════════════════
+
 
 @app.on_event("startup")
 async def startup_event():
@@ -123,6 +126,7 @@ async def startup_event():
 # ══════════════════════════════════════════════════════════════
 # HELPER — Run prediction in executor to avoid blocking async loop
 # ══════════════════════════════════════════════════════════════
+
 
 def _run_prediction_sync(city: str, compute_shap: bool) -> dict:
     """Synchronous prediction call (runs in thread pool from async context)."""
@@ -156,6 +160,8 @@ def _run_prediction_sync(city: str, compute_shap: bool) -> dict:
                 city, weather, aqi, historical_df, compute_shap=compute_shap
             )
         except Exception as exc:
+            if config.REQUIRE_FEATURE_STORE:
+                raise
             logger.warning(
                 "Feature Store inference path failed for '%s': %s. "
                 "Falling back to live fetch.",
@@ -173,19 +179,20 @@ def _run_prediction_sync(city: str, compute_shap: bool) -> dict:
 # ROUTES
 # ══════════════════════════════════════════════════════════════
 
+
 @app.get("/", summary="API Root")
 async def root():
     """Welcome endpoint with API overview."""
     return {
-        "name":        "Pearls AQI Predictor API",
-        "version":     "1.0.0",
+        "name": "Pearls AQI Predictor API",
+        "version": "1.0.0",
         "description": "Predict Air Quality Index for the next 3 days",
         "endpoints": {
-            "/predict":    "GET ?city=<city_name>&shap=true",
-            "/cities":     "GET — List supported cities",
-            "/health":     "GET — Health check",
+            "/predict": "GET ?city=<city_name>&shap=true",
+            "/cities": "GET — List supported cities",
+            "/health": "GET — Health check",
             "/model/info": "GET — Current model metadata",
-            "/docs":       "GET — OpenAPI documentation",
+            "/docs": "GET — OpenAPI documentation",
         },
         "example": "/predict?city=Karachi",
     }
@@ -199,10 +206,10 @@ async def health_check():
     """
     model_loaded = config.BEST_MODEL_PATH.exists()
     return HealthResponse(
-        status       = "healthy",
-        model_loaded = model_loaded,
-        api_version  = "1.0.0",
-        timestamp    = datetime.utcnow().isoformat(),
+        status="healthy",
+        model_loaded=model_loaded,
+        api_version="1.0.0",
+        timestamp=datetime.now(UTC).isoformat(),
     )
 
 
@@ -210,8 +217,8 @@ async def health_check():
 async def list_cities():
     """Return all cities supported by the prediction system."""
     return {
-        "cities":      config.SUPPORTED_CITIES,
-        "default":     config.DEFAULT_CITY,
+        "cities": config.SUPPORTED_CITIES,
+        "default": config.DEFAULT_CITY,
         "total_count": len(config.SUPPORTED_CITIES),
     }
 
@@ -221,7 +228,7 @@ async def predict(
     city: str = Query(
         default=config.DEFAULT_CITY,
         description="City name to predict AQI for",
-        example="Karachi",
+        examples=["Karachi"],
     ),
     shap: bool = Query(
         default=False,
@@ -256,8 +263,7 @@ async def predict(
         raise HTTPException(
             status_code=503,
             detail=(
-                "No trained model available. "
-                "Please run `python src/train.py` first."
+                "No trained model available. " "Please run `python src/train.py` first."
             ),
         )
 
@@ -270,7 +276,7 @@ async def predict(
         # Store in memory cache
         _prediction_cache[cache_key] = {
             "_cached_at": time.time(),
-            "data":       result,
+            "data": result,
         }
 
         return JSONResponse(content=result)
@@ -279,10 +285,7 @@ async def predict(
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as exc:
         logger.error(f"Prediction error for '{city_clean}': {exc}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Prediction failed: {str(exc)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Prediction failed: {str(exc)}")
 
 
 @app.get("/model/info", summary="Current Model Metadata")
@@ -293,8 +296,7 @@ async def model_info():
     """
     if not config.MODEL_METADATA_PATH.exists():
         raise HTTPException(
-            status_code=404,
-            detail="Model metadata not found. Train a model first."
+            status_code=404, detail="Model metadata not found. Train a model first."
         )
 
     metadata = load_json(config.MODEL_METADATA_PATH)
@@ -308,15 +310,14 @@ async def model_comparison():
 
     if not config.MODEL_COMPARISON_PATH.exists():
         raise HTTPException(
-            status_code=404,
-            detail="Model comparison not found. Train models first."
+            status_code=404, detail="Model comparison not found. Train models first."
         )
 
     df = pd.read_csv(config.MODEL_COMPARISON_PATH)
     return {
-        "models":      df.to_dict(orient="records"),
-        "best_model":  df.iloc[0]["model_name"] if len(df) > 0 else None,
-        "ranked_by":   "RMSE (ascending)",
+        "models": df.to_dict(orient="records"),
+        "best_model": df.iloc[0]["model_name"] if len(df) > 0 else None,
+        "ranked_by": "RMSE (ascending)",
     }
 
 
@@ -326,6 +327,7 @@ async def model_comparison():
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         "api.app:app",
         host=config.API_HOST,

@@ -17,21 +17,21 @@ Design:
   - SHAP uses TreeExplainer for tree-based models (fast), KernelExplainer fallback
 """
 
-import json
 import warnings
 import numpy as np
 import pandas as pd
 import joblib
 import shap
 from pathlib import Path
-from typing import Optional, Any
+from typing import Any
 
 import sys
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import config
-from src.utils import get_logger, timer, load_json, aqi_category
-from src.feature_engineering import generate_future_features
+import config  # noqa: E402
+from src.utils import get_logger, timer, load_json, aqi_category  # noqa: E402
+from src.feature_engineering import generate_future_features  # noqa: E402
 
 warnings.filterwarnings("ignore")
 logger = get_logger(__name__)
@@ -40,6 +40,7 @@ logger = get_logger(__name__)
 # ══════════════════════════════════════════════════════════════
 # MODEL LOADING
 # ══════════════════════════════════════════════════════════════
+
 
 def load_best_model() -> tuple[Any, Any, list[str], dict]:
     """
@@ -58,6 +59,7 @@ def load_best_model() -> tuple[Any, Any, list[str], dict]:
     if config.USE_FEATURE_STORE:
         try:
             from src.feature_store import load_model_from_registry
+
             model, scaler, feature_names, metadata = load_model_from_registry()
             logger.info(
                 f"Loaded from Registry: {metadata.get('model_name', 'Unknown')} "
@@ -65,7 +67,11 @@ def load_best_model() -> tuple[Any, Any, list[str], dict]:
             )
             return model, scaler, feature_names, metadata
         except Exception as exc:
-            logger.warning(f"Model Registry load failed ({exc}). Falling back to local.")
+            if config.REQUIRE_FEATURE_STORE:
+                raise
+            logger.warning(
+                f"Model Registry load failed ({exc}). Falling back to local."
+            )
 
     # -- Local fallback -----------------------------------------------
     if not config.BEST_MODEL_PATH.exists():
@@ -74,9 +80,13 @@ def load_best_model() -> tuple[Any, Any, list[str], dict]:
             "Run `python src/train.py` first."
         )
 
-    model    = joblib.load(config.BEST_MODEL_PATH)
-    scaler   = joblib.load(config.SCALER_PATH) if config.SCALER_PATH.exists() else None
-    metadata = load_json(config.MODEL_METADATA_PATH) if config.MODEL_METADATA_PATH.exists() else {}
+    model = joblib.load(config.BEST_MODEL_PATH)
+    scaler = joblib.load(config.SCALER_PATH) if config.SCALER_PATH.exists() else None
+    metadata = (
+        load_json(config.MODEL_METADATA_PATH)
+        if config.MODEL_METADATA_PATH.exists()
+        else {}
+    )
     feature_names = (
         load_json(config.FEATURE_NAMES_PATH)
         if config.FEATURE_NAMES_PATH.exists()
@@ -93,6 +103,7 @@ def load_best_model() -> tuple[Any, Any, list[str], dict]:
 # ══════════════════════════════════════════════════════════════
 # SHAP EXPLAINABILITY
 # ══════════════════════════════════════════════════════════════
+
 
 def compute_shap_values(
     model: Any,
@@ -118,13 +129,13 @@ def compute_shap_values(
         tree_models = ("randomforest", "gradientboosting", "xgb", "lgbm", "extra")
 
         if any(t in model_type for t in tree_models):
-            explainer  = shap.TreeExplainer(model)
-            shap_vals  = explainer.shap_values(X_sample)
+            explainer = shap.TreeExplainer(model)
+            shap_vals = explainer.shap_values(X_sample)
         else:
             # Use a small background dataset
             background = shap.sample(X_sample, min(50, len(X_sample)))
-            explainer  = shap.KernelExplainer(model.predict, background)
-            shap_vals  = explainer.shap_values(X_sample, nsamples=50)
+            explainer = shap.KernelExplainer(model.predict, background)
+            shap_vals = explainer.shap_values(X_sample, nsamples=50)
 
         if isinstance(shap_vals, list):
             shap_vals = shap_vals[0]
@@ -134,13 +145,17 @@ def compute_shap_values(
             zip(feature_names, mean_abs.tolist()),
             key=lambda x: x[1],
             reverse=True,
-        )[:15]  # Top 15 features
+        )[
+            :15
+        ]  # Top 15 features
 
         return {
-            "shap_values":     shap_vals.tolist(),
-            "feature_names":   feature_names,
-            "top_features":    [{"feature": f, "importance": round(v, 4)} for f, v in feature_importance],
-            "status":          "success",
+            "shap_values": shap_vals.tolist(),
+            "feature_names": feature_names,
+            "top_features": [
+                {"feature": f, "importance": round(v, 4)} for f, v in feature_importance
+            ],
+            "status": "success",
         }
 
     except Exception as exc:
@@ -152,6 +167,7 @@ def compute_shap_values(
 # PREDICTION
 # ══════════════════════════════════════════════════════════════
 
+
 def _align_features(df: pd.DataFrame, feature_names: list[str]) -> pd.DataFrame:
     """
     Align the input DataFrame to the exact feature set the model was trained on.
@@ -161,6 +177,49 @@ def _align_features(df: pd.DataFrame, feature_names: list[str]) -> pd.DataFrame:
         if col not in df.columns:
             df[col] = 0.0
     return df[feature_names]
+
+
+def append_current_observation(
+    historical_df: pd.DataFrame,
+    city: str,
+    current_weather: dict,
+    current_aqi: dict,
+) -> pd.DataFrame:
+    """Add the latest API reading so lag/rolling features use current context."""
+    last_values = historical_df.iloc[-1] if not historical_df.empty else {}
+    current_row = {
+        "timestamp": pd.Timestamp.now(),
+        "city": city,
+        "aqi": current_aqi.get("aqi", last_values.get("aqi", 0.0)),
+    }
+
+    for col in [
+        "pm2_5",
+        "pm10",
+        "co",
+        "no",
+        "no2",
+        "o3",
+        "so2",
+        "nh3",
+    ]:
+        if col in current_aqi or col in historical_df.columns:
+            current_row[col] = current_aqi.get(
+                col,
+                last_values.get(col, 0.0),
+            )
+
+    for col in ["temp", "humidity", "wind_speed", "pressure", "visibility"]:
+        if col in current_weather or col in historical_df.columns:
+            current_row[col] = current_weather.get(
+                col,
+                last_values.get(col, 0.0),
+            )
+
+    return pd.concat(
+        [historical_df.copy(), pd.DataFrame([current_row])],
+        ignore_index=True,
+    )
 
 
 @timer
@@ -193,7 +252,7 @@ def predict_next_days(
     model, scaler, feature_names, metadata = load_best_model()
 
     # ── 2. Feature engineering on history ────────────────────
-    from src.preprocess import handle_missing_values, remove_outliers, clean_data
+    from src.preprocess import handle_missing_values, clean_data
     from src.feature_engineering import add_all_features
 
     # Ensure history has required columns
@@ -201,15 +260,28 @@ def predict_next_days(
         historical_df["timestamp"] = pd.date_range(
             end=pd.Timestamp.now(), periods=len(historical_df), freq="h"
         )
+    else:
+        historical_df["timestamp"] = pd.to_datetime(
+            historical_df["timestamp"], errors="coerce"
+        )
+    historical_df = append_current_observation(
+        historical_df, city, current_weather, current_aqi
+    )
 
-    hist_clean     = clean_data(historical_df)
-    hist_imputed   = handle_missing_values(hist_clean)
-    hist_featured  = add_all_features(hist_imputed.copy())
-    hist_featured  = hist_featured.dropna()
+    hist_clean = clean_data(historical_df)
+    hist_imputed = handle_missing_values(hist_clean)
+    hist_featured = add_all_features(hist_imputed.copy())
+    hist_featured = hist_featured.dropna()
 
     # ── 3. Generate future features ──────────────────────────
     forecast_hours = forecast_days * 24
-    future_df      = generate_future_features(hist_featured, forecast_hours=forecast_hours)
+    future_df = generate_future_features(hist_featured, forecast_hours=forecast_hours)
+    for col in ["temp", "humidity", "wind_speed", "pressure", "visibility"]:
+        if col in feature_names and col not in future_df.columns:
+            future_df[col] = current_weather.get(
+                col,
+                hist_featured[col].iloc[-1] if col in hist_featured.columns else 0.0,
+            )
 
     # ── 4. Align to model features ───────────────────────────
     future_aligned = _align_features(future_df.copy(), feature_names)
@@ -235,68 +307,71 @@ def predict_next_days(
     daily_predictions = []
     for day in range(forecast_days):
         start_h = day * 24
-        end_h   = start_h + 24
+        end_h = start_h + 24
         day_preds = hourly_preds[start_h:end_h]
 
         daily_mean = float(np.mean(day_preds))
-        daily_max  = float(np.max(day_preds))
-        daily_min  = float(np.min(day_preds))
-        cat        = aqi_category(daily_mean)
-        date_label = (pd.Timestamp.now() + pd.Timedelta(days=day + 1)).strftime("%Y-%m-%d")
+        daily_max = float(np.max(day_preds))
+        daily_min = float(np.min(day_preds))
+        cat = aqi_category(daily_mean)
+        date_label = (pd.Timestamp.now() + pd.Timedelta(days=day + 1)).strftime(
+            "%Y-%m-%d"
+        )
 
-        daily_predictions.append({
-            "day":      day + 1,
-            "date":     date_label,
-            "aqi_mean": round(daily_mean, 1),
-            "aqi_max":  round(daily_max,  1),
-            "aqi_min":  round(daily_min,  1),
-            "category": cat["label"],
-            "color":    cat["color"],
-            "emoji":    cat["emoji"],
-            "alert":    daily_mean > config.AQI_ALERT_THRESHOLD,
-        })
+        daily_predictions.append(
+            {
+                "day": day + 1,
+                "date": date_label,
+                "aqi_mean": round(daily_mean, 1),
+                "aqi_max": round(daily_max, 1),
+                "aqi_min": round(daily_min, 1),
+                "category": cat["label"],
+                "color": cat["color"],
+                "emoji": cat["emoji"],
+                "alert": daily_mean > config.AQI_ALERT_THRESHOLD,
+            }
+        )
 
     # ── 8. SHAP explainability ───────────────────────────────
     shap_result = {}
     if compute_shap:
-        shap_result = compute_shap_values(
-            model, future_scaled, feature_names
-        )
+        shap_result = compute_shap_values(model, future_scaled, feature_names)
 
     # ── 9. Current AQI category ──────────────────────────────
     curr_aqi_val = float(current_aqi.get("aqi", 0))
-    curr_cat     = aqi_category(curr_aqi_val)
+    curr_cat = aqi_category(curr_aqi_val)
 
     result = {
-        "city":              city,
-        "current_aqi":       round(curr_aqi_val, 1),
-        "current_category":  curr_cat["label"],
-        "current_color":     curr_cat["color"],
-        "current_emoji":     curr_cat["emoji"],
-        "current_alert":     curr_aqi_val > config.AQI_ALERT_THRESHOLD,
+        "city": city,
+        "current_aqi": round(curr_aqi_val, 1),
+        "current_category": curr_cat["label"],
+        "current_color": curr_cat["color"],
+        "current_emoji": curr_cat["emoji"],
+        "current_alert": curr_aqi_val > config.AQI_ALERT_THRESHOLD,
         "current_weather": {
-            "temp":       current_weather.get("temp"),
-            "humidity":   current_weather.get("humidity"),
+            "temp": current_weather.get("temp"),
+            "humidity": current_weather.get("humidity"),
             "wind_speed": current_weather.get("wind_speed"),
-            "pressure":   current_weather.get("pressure"),
+            "pressure": current_weather.get("pressure"),
         },
         "current_pollutants": {
             "pm2_5": round(float(current_aqi.get("pm2_5", 0)), 2),
-            "pm10":  round(float(current_aqi.get("pm10",  0)), 2),
-            "no2":   round(float(current_aqi.get("no2",   0)), 2),
-            "o3":    round(float(current_aqi.get("o3",    0)), 2),
-            "co":    round(float(current_aqi.get("co",    0)), 2),
+            "pm10": round(float(current_aqi.get("pm10", 0)), 2),
+            "no2": round(float(current_aqi.get("no2", 0)), 2),
+            "o3": round(float(current_aqi.get("o3", 0)), 2),
+            "co": round(float(current_aqi.get("co", 0)), 2),
         },
         "daily_predictions": daily_predictions,
-        "model_name":        metadata.get("model_name", "Unknown"),
+        "model_name": metadata.get("model_name", "Unknown"),
         "model_metrics": {
-            "mae":  metadata.get("mae"),
+            "mae": metadata.get("mae"),
             "rmse": metadata.get("rmse"),
-            "r2":   metadata.get("r2"),
+            "r2": metadata.get("r2"),
+            "trained_at": metadata.get("trained_at"),
         },
-        "shap_explanation":  shap_result,
-        "forecast_days":     forecast_days,
-        "generated_at":      pd.Timestamp.now().isoformat(),
+        "shap_explanation": shap_result,
+        "forecast_days": forecast_days,
+        "generated_at": pd.Timestamp.now().isoformat(),
     }
 
     logger.info(
@@ -306,7 +381,6 @@ def predict_next_days(
         f"day3={daily_predictions[2]['aqi_mean']:.1f}"
     )
     return result
-
 
 
 # ══════════════════════════════════════════════════════════════
@@ -322,17 +396,22 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     from src.fetch_data import fetch_city_data
+
     weather, aqi, hist = fetch_city_data(args.city)
-    result = predict_next_days(args.city, weather, aqi, hist, compute_shap=not args.no_shap)
+    result = predict_next_days(
+        args.city, weather, aqi, hist, compute_shap=not args.no_shap
+    )
 
     print(f"\n  City        : {result['city']}")
     print(f"   Current AQI : {result['current_aqi']} ({result['current_category']})")
-    print(f"\n  3-Day Forecast:")
+    print("\n  3-Day Forecast:")
     for day in result["daily_predictions"]:
         alert = "     ALERT!" if day["alert"] else ""
-        print(f"  Day {day['day']} ({day['date']}): AQI {day['aqi_mean']}   {day['category']}{alert}")
+        print(
+            f"  Day {day['day']} ({day['date']}): AQI {day['aqi_mean']}   {day['category']}{alert}"
+        )
 
     if result["shap_explanation"].get("top_features"):
-        print(f"\n  Top Features (SHAP):")
+        print("\n  Top Features (SHAP):")
         for feat in result["shap_explanation"]["top_features"][:5]:
             print(f"  {feat['feature']:35s} {feat['importance']:.4f}")
