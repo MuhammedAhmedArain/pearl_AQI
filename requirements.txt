@@ -38,6 +38,7 @@ cachetools==5.3.3
 
 # Feature Store + Model Registry
 hopsworks>=4.0.0
+confluent-kafka>=2.3.0
 
 
 # Dev / Testing
