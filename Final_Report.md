@@ -68,6 +68,13 @@ Repository secrets should provide OpenWeatherMap and Hopsworks credentials.
 
 ## 5. Web Application
 
+Live Streamlit deployment:
+[https://pearlaqi.streamlit.app/](https://pearlaqi.streamlit.app/)
+
+Note for evaluators: Streamlit Community Cloud may put the application to sleep
+after inactivity. If a wake-up prompt appears, click the button and wait briefly
+for the app to restart.
+
 The web layer is split into:
 
 - `api/app.py`: FastAPI backend exposing health, prediction, city, model info,

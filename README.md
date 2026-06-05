@@ -5,6 +5,15 @@ hourly feature pipeline, historical backfill, multi-model training, Hopsworks
 Feature Store / Model Registry integration, a FastAPI backend, and a Streamlit
 dashboard with SHAP explanations and AQI alerts.
 
+## Live Deployment
+
+The Streamlit dashboard is deployed here:
+[https://pearlaqi.streamlit.app/](https://pearlaqi.streamlit.app/)
+
+Streamlit Community Cloud may put the app to sleep after inactivity. If the
+page shows a wake-up prompt, click the button to wake the app and wait briefly
+for it to restart.
+
 ## What It Implements
 
 | Internship requirement | Implementation |
@@ -16,7 +25,7 @@ dashboard with SHAP explanations and AQI alerts.
 | Training pipeline | `src/train.py` trains sklearn, XGBoost, MLP, and TensorFlow/Keras models |
 | Model Registry | Best model, scaler, feature schema, and metadata can be saved to Hopsworks |
 | CI/CD automation | GitHub Actions run tests, hourly feature ingestion, daily training, and manual backfill |
-| Web app | FastAPI backend in `api/app.py`; Streamlit dashboard in `app.py` |
+| Web app | Live Streamlit deployment plus FastAPI backend in `api/app.py`; dashboard source in `app.py` |
 | Explainability | SHAP feature importance in `src/predict.py` and the dashboard |
 | Alerts | Current and forecast AQI alerts when AQI exceeds the configured threshold |
 
