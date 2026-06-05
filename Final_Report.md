@@ -2,71 +2,11 @@
 
 ## Overview
 
-Pearls AQI Predictor is an end-to-end, serverless-friendly machine learning
-system that forecasts Air Quality Index (AQI) for the next 72 hours. It follows
-the internship specification by implementing feature ingestion, feature
-engineering, historical backfill, automated training, model registry support,
-and a web dashboard for real-time predictions.
-
-## 1. Feature Pipeline and Feature Store
-
-The feature pipeline in `src/fetch_data.py` fetches current weather and
-pollutant data from OpenWeatherMap. It combines the current observation with
-historical AQI context, computes model-ready features, and can push the latest
-complete row into Hopsworks Feature Store.
-In scheduled production mode, `REQUIRE_FEATURE_STORE=true` makes missing or
-failed Feature Store writes fail the run instead of silently falling back.
-
-Engineered features include:
-
-- Time features: hour, day of week, day of month, month, weekend flag, quarter
-- Cyclical encodings: hour, month, and day-of-week sine/cosine
-- Lag features: AQI and pollutant lags
-- Rolling statistics: 3-day, 7-day, and 14-day rolling means/stds
-- Change features: 1-hour and 3-hour AQI deltas and percentage change
-- Derived ratios: PM2.5/PM10 and NO2/O3
-- Exponential weighted means: 12-hour, 24-hour, and 72-hour AQI trends
-
-## 2. Historical Backfill
-
-The backfill pipeline in `src/backfill.py` generates 90 days of hourly
-historical AQI, pollutant, and weather context for supported cities. It applies
-the same feature engineering pipeline used by live ingestion and can seed the
-Hopsworks Feature Store. When Hopsworks is not configured, it saves a local CSV
-for development and testing.
-
-## 3. Training Pipeline and Model Registry
-
-The training pipeline in `src/train.py` loads historical features from
-Hopsworks when credentials are configured, otherwise it falls back to local CSV
-data. It evaluates multiple model families:
-
-- Linear Regression
-- Ridge Regression
-- Random Forest
-- Gradient Boosting
-- XGBoost
-- Scikit-learn MLP neural network
-- TensorFlow/Keras neural network when TensorFlow is available
-
-Models are evaluated with RMSE, MAE, and R2. The best model is selected by
-lowest RMSE. The selected model, scaler, feature schema, and metadata are saved
-locally and can also be published to the Hopsworks Model Registry.
-The daily training workflow runs in strict registry mode, so the selected model
-must be registered successfully for the automated run to pass.
-
-## 4. Automation
-
-The project uses GitHub Actions for automated CI/CD:
-
-- `ci-tests.yml`: runs linting and tests on push and pull request
-- `feature-pipeline.yml`: runs the feature pipeline every hour
-- `training-pipeline.yml`: retrains models daily at 02:00 UTC
-- `backfill.yml`: manually seeds historical data
-
-Repository secrets should provide OpenWeatherMap and Hopsworks credentials.
-
-## 5. Web Application
+Pearls AQI Predictor forecasts Air Quality Index (AQI) for the next 72 hours
+and displays the result as a 3-day dashboard forecast. The production automation
+path uses OpenWeather data ingestion, engineered features, Hopsworks Feature
+Store, multi-model training, Hopsworks Model Registry, GitHub Actions, and a
+Streamlit dashboard.
 
 Live Streamlit deployment:
 [https://pearlaqi.streamlit.app/](https://pearlaqi.streamlit.app/)
@@ -75,36 +15,164 @@ Note for evaluators: Streamlit Community Cloud may put the application to sleep
 after inactivity. If a wake-up prompt appears, click the button and wait briefly
 for the app to restart.
 
-The web layer is split into:
+## Compliance Checklist
 
-- `api/app.py`: FastAPI backend exposing health, prediction, city, model info,
-  and model comparison endpoints
-- `app.py`: Streamlit dashboard showing current AQI, 3-day forecasts, trend
-  charts, SHAP explanations, model metrics, and alert banners
+| Requirement | Status | Evidence | Notes |
+| --- | --- | --- | --- |
+| Predict AQI for next 3 days / 72 hours | Complete | `config.py`, `src/predict.py` | `FORECAST_DAYS=3`, `FORECAST_HOURS=72`; `predict_next_days()` generates hourly predictions and aggregates them into 3 daily forecasts. |
+| Use last 3 months / 90 days for training | Complete | `src/preprocess.py`, `src/feature_store.py` | `load_from_feature_store()` calls `get_training_data(days=90)`. |
+| Do not use CSV/local files as production data source | Complete for scheduled production | `.github/workflows/*.yml`, `config.py`, `src/preprocess.py` | GitHub Actions set `REQUIRE_FEATURE_STORE=true`, which forces Feature Store reads/writes and fails instead of falling back. CSV/local files remain development/demo fallback only. |
+| Use centralized Feature Store | Complete | `src/feature_store.py`, `.github/workflows/feature-pipeline.yml` | Hopsworks Feature Group `aqi_features` stores engineered feature rows. |
+| Feature pipeline fetches new data hourly | Complete | `.github/workflows/feature-pipeline.yml` | Cron schedule `0 * * * *`; runs `python src/fetch_data.py --city "Sukkur" --push-to-store`. |
+| Training pipeline runs daily | Complete | `.github/workflows/training-pipeline.yml` | Cron schedule `0 2 * * *`; runs `python src/train.py --no-tune`. |
+| Training data retrieved from Feature Store | Complete in production | `src/train.py`, `src/preprocess.py` | Daily workflow sets `REQUIRE_FEATURE_STORE=true`; training source becomes `feature_store`. |
+| Multiple ML models trained and compared | Complete | `src/train.py` | Trains Linear Regression, Ridge, Random Forest, Gradient Boosting, XGBoost, MLP, and TensorFlow/fallback neural model. |
+| Evaluation uses RMSE, MAE, R2 | Complete | `src/train.py` | `evaluate_model()` computes MAE, RMSE, and R2; comparison CSV stores all three. |
+| Best model selected automatically | Complete | `src/train.py` | Results are sorted by RMSE, then MAE; `select_and_save_best_model()` uses the top result. |
+| Best model stored in Model Registry | Complete in production | `src/train.py`, `src/feature_store.py` | With Hopsworks configured, `save_model_to_registry()` stores model, scaler, feature names, and metadata. In strict production mode, registry save failure raises an error. |
+| Dashboard shows real-time AQI, forecast, charts, alerts, model info | Complete | `app.py`, `api/app.py` | Dashboard displays current AQI, 3-day forecast cards, charts, alert banners, model metrics, and model comparison. |
+| GitHub Actions or Airflow automation exists | Complete | `.github/workflows/` | CI tests, hourly feature ingestion, daily training, and manual backfill workflows exist. |
 
-The assignment allows Flask/FastAPI, so FastAPI is used for the backend.
+## Production Data and Fallback Policy
 
-## 6. Advanced Analytics
+Hopsworks Feature Store is the production source of truth for scheduled
+ingestion and training. The hourly feature pipeline writes the newest engineered
+observation to Hopsworks. The daily training pipeline reads the last 90 days of
+training features from Hopsworks.
+
+CSV and local model artifacts are retained only for local development,
+debugging, and Streamlit demo resilience. They are not the production source for
+the scheduled GitHub Actions pipelines. This is enforced by
+`REQUIRE_FEATURE_STORE=true` in the hourly feature and daily training workflows.
+When that flag is enabled, Feature Store read/write failures and Model Registry
+save/load failures are fatal instead of silently falling back.
+
+## Feature Pipeline
+
+`src/fetch_data.py` fetches current weather and pollutant data from
+OpenWeatherMap, combines it with recent AQI history, computes the latest
+model-ready feature row, and pushes it to Hopsworks through
+`src/feature_store.py`.
+
+The scheduled production feature pipeline is defined in
+`.github/workflows/feature-pipeline.yml` and runs every hour. It installs the
+Hopsworks Python/Kafka dependencies, verifies the imports, sets
+`REQUIRE_FEATURE_STORE=true`, and runs:
+
+```bash
+python src/fetch_data.py --city "Sukkur" --push-to-store
+```
+
+## Historical Backfill
+
+`src/backfill.py` generates 90 days of hourly AQI, pollutant, and weather
+context and applies the same feature engineering logic used by live ingestion.
+The manual backfill workflow can seed Hopsworks before automated daily training
+is evaluated.
+
+Local CSV output from backfill is a development fallback and audit artifact; it
+is not the production data source when strict mode is enabled.
+
+## Training Pipeline and Model Registry
+
+`src/train.py` runs the end-to-end training pipeline. In production, the daily
+GitHub Actions workflow sets `REQUIRE_FEATURE_STORE=true`, causing
+`run_training_pipeline()` to force `source="feature_store"`. Training therefore
+retrieves the last 90 days from Hopsworks through `get_training_data(days=90)`.
+
+The pipeline trains and compares:
+
+- Linear Regression
+- Ridge Regression
+- Random Forest
+- Gradient Boosting
+- XGBoost
+- Scikit-learn MLP neural network
+- TensorFlow/Keras neural network, with sklearn MLP fallback when TensorFlow is
+  unavailable
+
+Each model is evaluated using MAE, RMSE, and R2. The best model is selected
+automatically by lowest RMSE, with MAE as the secondary sort key. The selected
+model, scaler, feature schema, and metadata are saved to the Hopsworks Model
+Registry in production. Because strict mode is enabled in the daily workflow,
+registry save failure fails the training run.
+
+## Prediction and Dashboard
+
+`src/predict.py` loads the registered Hopsworks model first when Hopsworks
+credentials are configured. In strict mode, a Model Registry load failure is
+fatal. Outside strict mode, local artifacts are allowed as a development/demo
+fallback.
+
+The FastAPI backend in `api/app.py` uses Hopsworks latest feature rows for
+inference when Hopsworks credentials are configured. If strict mode is disabled,
+it can fall back to live API fetches so the app remains demoable during local
+development.
+
+The Streamlit dashboard in `app.py` shows:
+
+- Current AQI and category
+- 3-day forecast
+- Forecast trend charts
+- Hazardous/unhealthy AQI alerts
+- Model name, training timestamp, RMSE, MAE, and R2
+- Optional SHAP feature importance
+- Model comparison leaderboard
+
+The deployed Streamlit app uses the same codebase. Whether the deployed app
+uses Hopsworks/Model Registry at runtime depends on the Streamlit Cloud secrets
+configured for that deployment. To make the live deployment strictly production
+backed, set `HOPSWORKS_API_KEY`, `HOPSWORKS_PROJECT`, `HOPSWORKS_HOST`, and
+`REQUIRE_FEATURE_STORE=true` in Streamlit Cloud secrets.
+
+## Automation
+
+The project uses GitHub Actions:
+
+- `.github/workflows/ci-tests.yml`: linting and tests on push, pull request,
+  and manual dispatch
+- `.github/workflows/feature-pipeline.yml`: hourly feature ingestion into
+  Hopsworks
+- `.github/workflows/training-pipeline.yml`: daily retraining from Hopsworks and
+  Model Registry publishing
+- `.github/workflows/backfill.yml`: manual 90-day historical Feature Store seed
+
+## Advanced Analytics
 
 The project includes:
 
 - EDA notebook in `notebooks/EDA.ipynb`
 - SHAP feature importance in `src/predict.py`
-- Dashboard SHAP bar chart
-- Hazardous AQI alerts when AQI exceeds the configured threshold
+- Dashboard SHAP bar chart, enabled on demand
+- AQI alerts when current or forecast AQI exceeds configured thresholds
 
-## Current Limitations
+## Audit Conclusion
 
-- The default configured city is `Sukkur`.
-- Hopsworks must be configured through environment variables and GitHub secrets
-  for the fully serverless path.
-- Local fallback data is included so the app remains demoable without external
-  services.
-- SHAP explanations are available on demand in the dashboard to keep normal
-  inference responsive.
+Project fully satisfies the internship requirements for the scheduled
+production pipeline. The earlier report wording needed correction because it
+used weak phrases such as "can push" and "can be published" without clearly
+separating production strict mode from local/demo fallback behavior.
 
-## Conclusion
+The main remaining operational requirement is configuration, not code: the
+Hopsworks and OpenWeather secrets must be present in GitHub Actions, and the
+Streamlit Cloud deployment should also define the Hopsworks secrets plus
+`REQUIRE_FEATURE_STORE=true` if evaluators require the live app itself to fail
+rather than use local/demo fallback.
 
-The project now satisfies the core internship requirements: feature pipeline,
-historical backfill, feature store integration, model training, model registry
-support, automation, dashboard, explainability, alerts, and final reporting.
+## Exact Fixes Needed
+
+No project code fix is required for the scheduled production requirements based
+on the audited files. The smallest deployment/configuration fix, if not already
+done, is to add these secrets to Streamlit Cloud:
+
+```text
+OPENWEATHER_API_KEY
+HOPSWORKS_API_KEY
+HOPSWORKS_PROJECT=pearlsAQI
+HOPSWORKS_HOST=eu-west.cloud.hopsworks.ai
+REQUIRE_FEATURE_STORE=true
+```
+
+Without those Streamlit Cloud secrets, the deployed dashboard may still run in
+demo-resilient mode using live fetch/local artifacts, while GitHub Actions
+remain the strict production MLOps path.
