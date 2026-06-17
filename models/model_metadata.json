@@ -1,10 +1,10 @@
 {
   "model_name": "Random Forest",
-  "mae": 18.0412,
-  "rmse": 24.707,
-  "r2": 0.0471,
-  "cv_rmse_mean": 15.5693,
-  "cv_rmse_std": 0.9406,
+  "mae": 19.1451,
+  "rmse": 25.9304,
+  "r2": -0.0017,
+  "cv_rmse_mean": 15.9451,
+  "cv_rmse_std": 1.3303,
   "feature_count": 47,
   "feature_names": [
     "pm2_5",
@@ -55,7 +55,7 @@
     "aqi_ewm_72h",
     "timestamp_offset"
   ],
-  "trained_at": "2026-06-16T07:30:22.528005",
+  "trained_at": "2026-06-17T07:11:16.127864",
   "config": {
     "test_size": 0.2,
     "cv_folds": 5,
