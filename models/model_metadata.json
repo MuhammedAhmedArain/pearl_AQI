@@ -1,10 +1,10 @@
 {
-  "model_name": "Random Forest",
-  "mae": 46.0623,
-  "rmse": 52.0207,
-  "r2": -2.5677,
-  "cv_rmse_mean": 15.8956,
-  "cv_rmse_std": 1.4646,
+  "model_name": "XGBoost",
+  "mae": 46.9249,
+  "rmse": 52.598,
+  "r2": -2.7858,
+  "cv_rmse_mean": 15.4265,
+  "cv_rmse_std": 1.9882,
   "feature_count": 47,
   "feature_names": [
     "pm2_5",
@@ -55,7 +55,7 @@
     "aqi_ewm_72h",
     "timestamp_offset"
   ],
-  "trained_at": "2026-07-07T06:11:08.823334",
+  "trained_at": "2026-07-08T05:22:58.640097",
   "config": {
     "test_size": 0.2,
     "cv_folds": 5,
