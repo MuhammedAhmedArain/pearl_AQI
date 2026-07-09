@@ -1,10 +1,10 @@
 {
   "model_name": "XGBoost",
-  "mae": 46.9249,
-  "rmse": 52.598,
-  "r2": -2.7858,
-  "cv_rmse_mean": 15.4265,
-  "cv_rmse_std": 1.9882,
+  "mae": 47.8651,
+  "rmse": 53.3262,
+  "r2": -3.0019,
+  "cv_rmse_mean": 15.5021,
+  "cv_rmse_std": 2.3267,
   "feature_count": 47,
   "feature_names": [
     "pm2_5",
@@ -55,7 +55,7 @@
     "aqi_ewm_72h",
     "timestamp_offset"
   ],
-  "trained_at": "2026-07-08T05:22:58.640097",
+  "trained_at": "2026-07-09T06:07:18.716164",
   "config": {
     "test_size": 0.2,
     "cv_folds": 5,
