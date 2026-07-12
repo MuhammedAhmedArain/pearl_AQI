@@ -36,14 +36,28 @@ jobs:
           python -c "import confluent_kafka, hopsworks, hsfs; print('Hopsworks Kafka dependencies available')"
 
       - name: Run training pipeline
+        id: train
+        timeout-minutes: 90
+        continue-on-error: true
         env:
           OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
           HOPSWORKS_API_KEY: ${{ secrets.HOPSWORKS_API_KEY }}
           HOPSWORKS_PROJECT: pearlsAQI
           HOPSWORKS_HOST: eu-west.cloud.hopsworks.ai
           REQUIRE_FEATURE_STORE: "true"
+          HOPSWORKS_MAX_RETRIES: "3"
+          HOPSWORKS_BACKOFF_BASE: "10"
         run: |
           python src/train.py --no-tune
+
+      - name: Verify training output exists
+        id: verify
+        run: |
+          if [ ! -f models/model_metadata.json ]; then
+            echo "::error::Training failed — no model_metadata.json produced."
+            exit 1
+          fi
+          echo "✅ model_metadata.json found."
 
       - name: Upload model artifacts (backup)
         uses: actions/upload-artifact@v4
@@ -53,6 +67,7 @@ jobs:
           retention-days: 30
 
       - name: Post model metrics summary
+        if: steps.verify.outcome == 'success'
         run: |
           python -c "
           import json, pathlib
@@ -66,6 +81,7 @@ jobs:
           "
 
       - name: Commit and push latest results
+        if: steps.verify.outcome == 'success'
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"

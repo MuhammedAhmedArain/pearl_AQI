@@ -479,9 +479,14 @@ def select_and_save_best_model(
             )
             logger.info("   Model saved to Hopsworks Model Registry.")
         except Exception as exc:
-            if config.REQUIRE_FEATURE_STORE:
-                raise
-            logger.warning(f"   Model Registry save failed (non-fatal): {exc}")
+            # Registry upload is best-effort — local model files are
+            # already saved above.  Don't crash the pipeline for a
+            # transient upload failure (Flight port blocked, 500, etc.).
+            logger.error(
+                f"   ⚠️  Model Registry save FAILED: {exc}\n"
+                "   Local model files are intact. The dashboard will "
+                "fall back to local model automatically."
+            )
     else:
         if config.REQUIRE_FEATURE_STORE:
             raise RuntimeError(

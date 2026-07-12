@@ -20,7 +20,9 @@ Design:
 """
 
 import json
+import os
 import tempfile
+import time
 import warnings
 import numpy as np
 import pandas as pd
@@ -41,6 +43,26 @@ logger = get_logger(__name__)
 
 
 # ══════════════════════════════════════════════════════════════
+# CONSTANTS
+# ══════════════════════════════════════════════════════════════
+
+# Max retries for transient Hopsworks / Arrow Flight errors
+_MAX_RETRIES = int(os.getenv("HOPSWORKS_MAX_RETRIES", "3"))
+_BACKOFF_BASE = float(os.getenv("HOPSWORKS_BACKOFF_BASE", "5"))  # seconds
+
+# Exception families we consider transient and worth retrying
+_TRANSIENT_NAMES = (
+    "FlightUnavailableError",
+    "FlightInternalError",
+    "FlightTimedOutError",
+    "ArrowInvalid",
+    "ConnectionError",
+    "TimeoutError",
+    "ReadTimeoutError",
+)
+
+
+# ══════════════════════════════════════════════════════════════
 # EXCEPTIONS
 # ══════════════════════════════════════════════════════════════
 
@@ -49,6 +71,55 @@ class FeatureStoreNotConfigured(RuntimeError):
     """Raised when HOPSWORKS_API_KEY is not set or is a placeholder."""
 
     pass
+
+
+# ══════════════════════════════════════════════════════════════
+# RETRY HELPER
+# ══════════════════════════════════════════════════════════════
+
+
+def _is_transient(exc: Exception) -> bool:
+    """Return True if *exc* looks like a transient Flight / network error."""
+    name = type(exc).__name__
+    if name in _TRANSIENT_NAMES:
+        return True
+    # Walk the cause-chain (raise … from …)
+    cause = exc.__cause__ or exc.__context__
+    while cause:
+        if type(cause).__name__ in _TRANSIENT_NAMES:
+            return True
+        cause = cause.__cause__ or cause.__context__
+    # Last resort: check the string repr (catches wrapped gRPC errors)
+    msg = str(exc).lower()
+    return any(kw in msg for kw in (
+        "flight", "unavailable", "connect", "timed out",
+        "tcp handshaker", "grpc",
+    ))
+
+
+def _retry(fn, *, label: str, max_retries: int = _MAX_RETRIES):
+    """
+    Call *fn()* up to *max_retries* times with exponential back-off.
+
+    Only retries on errors that look transient (Flight / network).
+    All other exceptions propagate immediately.
+    """
+    last_exc = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            return fn()
+        except Exception as exc:
+            last_exc = exc
+            if not _is_transient(exc) or attempt == max_retries:
+                break
+            wait = _BACKOFF_BASE * (2 ** (attempt - 1))
+            logger.warning(
+                f"[{label}] attempt {attempt}/{max_retries} failed "
+                f"({type(exc).__name__}: {exc}). "
+                f"Retrying in {wait:.0f}s …"
+            )
+            time.sleep(wait)
+    raise last_exc
 
 
 # ══════════════════════════════════════════════════════════════
@@ -258,6 +329,11 @@ def get_training_data(days: int = 90) -> pd.DataFrame:
     """
     Fetch the last `days` days of data from the Feature Store for training.
 
+    Read strategy (each step retried with back-off):
+      1. Feature View .training_data()   — fastest, time-filtered
+      2. Feature View .get_batch_data()   — full dump, filter later
+      3. Feature Group .read()            — direct FG fallback
+
     Returns a DataFrame with all feature columns + target (aqi).
     Raises FeatureStoreNotConfigured if Hopsworks is not set up.
     """
@@ -274,8 +350,12 @@ def get_training_data(days: int = 90) -> pd.DataFrame:
                 name=config.FEATURE_VIEW_NAME,
                 version=config.FEATURE_VIEW_VERSION,
             )
-            # Smoke-test: if the view is stale it may return None on queries
-            test_df = fv.get_batch_data()
+            # Smoke-test: if the view is stale it may return None
+            test_df = _retry(
+                lambda: fv.get_batch_data(),
+                label="FV-smoke-test",
+                max_retries=2,
+            )
             if test_df is not None and len(test_df) > 0:
                 break  # view is healthy
             # View exists but returns no data — delete and recreate
@@ -296,30 +376,58 @@ def get_training_data(days: int = 90) -> pd.DataFrame:
                 query=fg.select_all(),
             )
 
-    # --- Fetch data ---------------------------------------------------
+    # --- Fetch data (three-tier strategy) -----------------------------
     end_dt = datetime.utcnow()
     start_dt = end_dt - timedelta(days=days)
 
     df = None
-    try:
-        df, _ = fv.training_data(
-            start_time=start_dt,
-            end_time=end_dt,
-        )
-    except Exception:
-        pass
 
+    # Strategy 1: Feature View .training_data() with time filter
+    try:
+        logger.info("Strategy 1: FV.training_data() ...")
+        result = _retry(
+            lambda: fv.training_data(start_time=start_dt, end_time=end_dt),
+            label="FV-training-data",
+        )
+        if result is not None:
+            df = result[0] if isinstance(result, tuple) else result
+    except Exception as exc:
+        logger.warning(f"Strategy 1 failed ({type(exc).__name__}: {exc}).")
+
+    # Strategy 2: Feature View .get_batch_data() (full read)
     if df is None or len(df) == 0:
         try:
-            df = fv.get_batch_data()
-        except Exception:
-            pass
+            logger.info("Strategy 2: FV.get_batch_data() ...")
+            df = _retry(
+                lambda: fv.get_batch_data(),
+                label="FV-batch-data",
+            )
+        except Exception as exc:
+            logger.warning(f"Strategy 2 failed ({type(exc).__name__}: {exc}).")
+
+    # Strategy 3: Direct Feature Group .read() — bypasses Feature View
+    if df is None or len(df) == 0:
+        try:
+            logger.info("Strategy 3: FG.read() (direct fallback) ...")
+            df = _retry(
+                lambda: fg.read(),
+                label="FG-read",
+            )
+        except Exception as exc:
+            logger.warning(f"Strategy 3 failed ({type(exc).__name__}: {exc}).")
 
     if df is None or len(df) == 0:
         raise ValueError(
-            "Feature Store returned empty training data. "
+            "Feature Store returned empty training data after all strategies. "
             "Run `python src/backfill.py` first to populate the Feature Store."
         )
+
+    # Time-filter the results if we got a full dump
+    if "timestamp" in df.columns:
+        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+        mask = df["timestamp"] >= pd.Timestamp(start_dt)
+        if mask.sum() > 0:
+            df = df[mask]
 
     logger.info(f"Fetched {len(df)} training rows from Feature Store.")
     return df
@@ -339,15 +447,34 @@ def get_latest_features(city: str, n_rows: int = 48) -> pd.DataFrame:
         DataFrame sorted by timestamp ascending, last `n_rows` rows.
     """
     fs = get_feature_store()
+    fg = get_or_create_feature_group()
 
+    df = None
+
+    # Try Feature View first (with retry)
     try:
         fv = fs.get_feature_view(
             name=config.FEATURE_VIEW_NAME,
             version=config.FEATURE_VIEW_VERSION,
         )
-        df = fv.get_batch_data()
+        df = _retry(
+            lambda: fv.get_batch_data(),
+            label="latest-fv-batch",
+        )
     except Exception as exc:
-        raise RuntimeError(f"Could not fetch latest features: {exc}") from exc
+        logger.warning(f"Feature View read failed ({exc}). Trying FG.read() ...")
+
+    # Fallback: direct Feature Group read
+    if df is None or len(df) == 0:
+        try:
+            df = _retry(
+                lambda: fg.read(),
+                label="latest-fg-read",
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"Could not fetch latest features: {exc}"
+            ) from exc
 
     # Filter to city
     if "city" in df.columns:
@@ -382,6 +509,10 @@ def save_model_to_registry(
       - scaler.pkl
       - feature_names.json
       - model_metadata.json
+
+    Retries with exponential back-off on transient Flight / network
+    errors so that temporary port-5005 blocks (e.g. GitHub Actions)
+    don't crash the pipeline.
     """
     mr = get_model_registry()
     logger.info(f"Saving model '{metadata.get('model_name')}' to Model Registry ...")
@@ -395,25 +526,31 @@ def save_model_to_registry(
         (tmp / "feature_names.json").write_text(json.dumps(feature_names))
         (tmp / "model_metadata.json").write_text(json.dumps(metadata))
 
-        # Create / get model in registry
-        aqi_model = mr.python.create_model(
-            name=config.MODEL_NAME,
-            metrics={
-                "rmse": metadata.get("rmse", 0),
-                "mae": metadata.get("mae", 0),
-                "r2": metadata.get("r2", 0),
-            },
-            description=(
-                f"Pearls AQI Predictor — "
-                f"{metadata.get('model_name', 'unknown')} | "
-                f"RMSE={metadata.get('rmse')} | "
-                f"Trained {metadata.get('trained_at', '')}"
+        # Create / get model in registry (retry on transient errors)
+        aqi_model = _retry(
+            lambda: mr.python.create_model(
+                name=config.MODEL_NAME,
+                metrics={
+                    "rmse": metadata.get("rmse", 0),
+                    "mae": metadata.get("mae", 0),
+                    "r2": metadata.get("r2", 0),
+                },
+                description=(
+                    f"Pearls AQI Predictor — "
+                    f"{metadata.get('model_name', 'unknown')} | "
+                    f"RMSE={metadata.get('rmse')} | "
+                    f"Trained {metadata.get('trained_at', '')}"
+                ),
+                input_example=None,
+                model_schema=None,
             ),
-            input_example=None,
-            model_schema=None,
+            label="MR-create-model",
         )
 
-        aqi_model.save(str(tmp))
+        _retry(
+            lambda: aqi_model.save(str(tmp)),
+            label="MR-save-model",
+        )
 
     logger.info(
         f"Model saved to Registry: {config.MODEL_NAME} "
