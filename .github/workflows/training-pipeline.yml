@@ -47,8 +47,10 @@ jobs:
           REQUIRE_FEATURE_STORE: "true"
           HOPSWORKS_MAX_RETRIES: "3"
           HOPSWORKS_BACKOFF_BASE: "10"
+          HOPSWORKS_DISABLE_FLIGHT: "true"
         run: |
           python src/train.py --no-tune
+
 
       - name: Verify training output exists
         id: verify

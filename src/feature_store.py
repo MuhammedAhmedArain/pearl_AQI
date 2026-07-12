@@ -123,6 +123,47 @@ def _retry(fn, *, label: str, max_retries: int = _MAX_RETRIES):
 
 
 # ══════════════════════════════════════════════════════════════
+# ARROW FLIGHT KILL-SWITCH
+# ══════════════════════════════════════════════════════════════
+
+_flight_disabled = False
+
+
+def _disable_flight_client():
+    """
+    Programmatically disable the hsfs Arrow Flight client for this session.
+
+    When disabled, ``_should_be_used()`` returns False so that:
+      * ``fg.read()`` falls back to REST file download (port 443)
+        via ``dataset_api.read_content()``.
+      * ``is_data_format_supported()`` / ``is_query_supported()``
+        return False, preventing any Flight call.
+
+    Called automatically when ``HOPSWORKS_DISABLE_FLIGHT=true``.
+    """
+    global _flight_disabled
+    if _flight_disabled:
+        return
+    try:
+        from hsfs.core import arrow_flight_client as _afc
+
+        inst = _afc.get_instance()
+        inst._disabled_for_session = True
+        logger.info(
+            "Arrow Flight client disabled for this session — "
+            "all reads will use REST API (port 443)."
+        )
+    except Exception as exc:
+        logger.debug(f"Could not disable Arrow Flight client: {exc}")
+    _flight_disabled = True
+
+
+def _is_flight_disabled() -> bool:
+    """Return True when Flight has been disabled."""
+    return _flight_disabled
+
+
+# ══════════════════════════════════════════════════════════════
 # CONNECTION (lazy singleton)
 # ══════════════════════════════════════════════════════════════
 
@@ -157,6 +198,18 @@ def _connect() -> tuple:
                 api_key_value=config.HOPSWORKS_API_KEY,
                 cert_folder=tempfile.gettempdir(),
             )
+
+            # Disable Arrow Flight if requested before calling get_feature_store()
+            # (CI runners can't reach port 5005, pre-setting disables connection attempts)
+            if os.getenv("HOPSWORKS_DISABLE_FLIGHT", "").lower() in ("true", "1"):
+                try:
+                    from hsfs.core import arrow_flight_client as _afc
+                    _afc._arrow_flight_instance = _afc.ArrowFlightClient(disabled_for_session=True)
+                    logger.info("Arrow Flight client disabled before get_feature_store() to prevent connection attempts.")
+                except Exception as exc:
+                    logger.debug(f"Could not pre-disable Arrow Flight: {exc}")
+                _disable_flight_client()
+
             _fs = _project.get_feature_store()
             _mr = _project.get_model_registry()
             logger.info("Connected to Hopsworks successfully.")
@@ -168,6 +221,7 @@ def _connect() -> tuple:
 
 
 def get_feature_store():
+
     """Return connected Hopsworks feature store handle."""
     _, fs, _ = _connect()
     return fs
@@ -329,10 +383,15 @@ def get_training_data(days: int = 90) -> pd.DataFrame:
     """
     Fetch the last `days` days of data from the Feature Store for training.
 
-    Read strategy (each step retried with back-off):
+    Read strategy (order depends on whether Arrow Flight is available):
+
+    When Flight is *enabled* (local dev, Streamlit cloud):
       1. Feature View .training_data()   — fastest, time-filtered
       2. Feature View .get_batch_data()   — full dump, filter later
-      3. Feature Group .read()            — direct FG fallback
+      3. Feature Group .read()            — REST file fallback
+
+    When Flight is *disabled* (CI runners where port 5005 is blocked):
+      → Feature Group .read()  only  (uses REST download on port 443)
 
     Returns a DataFrame with all feature columns + target (aqi).
     Raises FeatureStoreNotConfigured if Hopsworks is not set up.
@@ -342,80 +401,82 @@ def get_training_data(days: int = 90) -> pd.DataFrame:
 
     fg = get_or_create_feature_group()
 
-    # --- Obtain (or re-create) the Feature View ----------------------
-    fv = None
-    for attempt in range(2):
-        try:
-            fv = fs.get_feature_view(
-                name=config.FEATURE_VIEW_NAME,
-                version=config.FEATURE_VIEW_VERSION,
-            )
-            # Smoke-test: if the view is stale it may return None
-            test_df = _retry(
-                lambda: fv.get_batch_data(),
-                label="FV-smoke-test",
-                max_retries=2,
-            )
-            if test_df is not None and len(test_df) > 0:
-                break  # view is healthy
-            # View exists but returns no data — delete and recreate
-            logger.warning("Feature View returned empty data, recreating ...")
-            try:
-                fv.delete()
-            except Exception:
-                pass
-            fv = None
-        except Exception:
-            fv = None
-
-        if fv is None:
-            logger.info("Creating fresh Feature View from Feature Group ...")
-            fv = fs.get_or_create_feature_view(
-                name=config.FEATURE_VIEW_NAME,
-                version=config.FEATURE_VIEW_VERSION,
-                query=fg.select_all(),
-            )
-
-    # --- Fetch data (three-tier strategy) -----------------------------
     end_dt = datetime.utcnow()
     start_dt = end_dt - timedelta(days=days)
-
     df = None
 
-    # Strategy 1: Feature View .training_data() with time filter
-    try:
-        logger.info("Strategy 1: FV.training_data() ...")
-        result = _retry(
-            lambda: fv.training_data(start_time=start_dt, end_time=end_dt),
-            label="FV-training-data",
-        )
-        if result is not None:
-            df = result[0] if isinstance(result, tuple) else result
-    except Exception as exc:
-        logger.warning(f"Strategy 1 failed ({type(exc).__name__}: {exc}).")
-
-    # Strategy 2: Feature View .get_batch_data() (full read)
-    if df is None or len(df) == 0:
+    # ── When Flight is disabled, use materialized training dataset (REST) ──
+    if _is_flight_disabled():
+        logger.info("Flight disabled — using REST materialization read path ...")
+        fv = _get_or_create_feature_view(fs, fg)
         try:
-            logger.info("Strategy 2: FV.get_batch_data() ...")
-            df = _retry(
-                lambda: fv.get_batch_data(),
-                label="FV-batch-data",
-            )
-        except Exception as exc:
-            logger.warning(f"Strategy 2 failed ({type(exc).__name__}: {exc}).")
+            # Step A: Check for existing materialized datasets to avoid job creation overhead
+            logger.info("Checking for existing materialized training datasets ...")
+            tds = fv.get_training_datasets()
+            # Filter out IN_MEMORY datasets because they do not have files on disk and require Flight to read
+            tds = [td for td in tds if td.training_dataset_type != td.IN_MEMORY]
+            if tds:
+                latest_td = sorted(tds, key=lambda x: x.version, reverse=True)[0]
+                logger.info(f"Loading latest materialized training dataset version {latest_td.version} ...")
+                result = fv.get_training_data(training_dataset_version=latest_td.version)
+                df = result[0] if isinstance(result, tuple) else result
 
-    # Strategy 3: Direct Feature Group .read() — bypasses Feature View
-    if df is None or len(df) == 0:
+            # Step B: If none exists, materialize a new one
+            if df is None or len(df) == 0:
+                logger.info("No existing training dataset found. Materializing new version on cluster ...")
+                version, job = fv.create_training_data(
+                    start_time=start_dt,
+                    end_time=end_dt,
+                    description=f"Auto-materialized training dataset for last {days} days",
+                    data_format="parquet",
+                    write_options={"wait_for_job": True}
+                )
+                logger.info(f"Materialization complete. Downloading version {version} ...")
+                result = fv.get_training_data(training_dataset_version=version)
+                df = result[0] if isinstance(result, tuple) else result
+        except Exception as exc:
+            logger.warning(f"REST-based materialized read failed ({type(exc).__name__}: {exc}).")
+    else:
+        # ── Flight available — try Feature View first ────────────────
+        fv = _get_or_create_feature_view(fs, fg)
+
+        # Strategy 1: FV.training_data()
         try:
-            logger.info("Strategy 3: FG.read() (direct fallback) ...")
-            df = _retry(
-                lambda: fg.read(),
-                label="FG-read",
+            logger.info("Strategy 1: FV.training_data() ...")
+            result = _retry(
+                lambda: fv.training_data(start_time=start_dt, end_time=end_dt),
+                label="FV-training-data",
             )
+            if result is not None:
+                df = result[0] if isinstance(result, tuple) else result
         except Exception as exc:
-            logger.warning(f"Strategy 3 failed ({type(exc).__name__}: {exc}).")
+            logger.warning(f"Strategy 1 failed ({type(exc).__name__}: {exc}).")
 
+        # Strategy 2: FV.get_batch_data()
+        if df is None or len(df) == 0:
+            try:
+                logger.info("Strategy 2: FV.get_batch_data() ...")
+                df = _retry(
+                    lambda: fv.get_batch_data(),
+                    label="FV-batch-data",
+                )
+            except Exception as exc:
+                logger.warning(f"Strategy 2 failed ({type(exc).__name__}: {exc}).")
+
+        # Strategy 3: Materialize fallback if Flight fails
+        if df is None or len(df) == 0:
+            logger.info("Strategies 1-2 failed — disabling Flight, using REST materialization ...")
+            _disable_flight_client()
+            try:
+                tds = fv.get_training_datasets()
+                tds = [td for td in tds if td.training_dataset_type != td.IN_MEMORY]
+                if tds:
+                    latest_td = sorted(tds, key=lambda x: x.version, reverse=True)[0]
+                    logger.info(f"Loading materialized training dataset version {latest_td.version} ...")
+                    result = fv.get_training_data(training_dataset_version=latest_td.version)
+                    df = result[0] if isinstance(result, tuple) else result
+            except Exception as exc:
+                logger.warning(f"Materialization fallback failed ({type(exc).__name__}: {exc}).")
     if df is None or len(df) == 0:
         raise ValueError(
             "Feature Store returned empty training data after all strategies. "
@@ -431,6 +492,29 @@ def get_training_data(days: int = 90) -> pd.DataFrame:
 
     logger.info(f"Fetched {len(df)} training rows from Feature Store.")
     return df
+
+
+def _get_or_create_feature_view(fs, fg):
+    """Obtain (or re-create) the Feature View. Internal helper."""
+    fv = None
+    for _attempt in range(2):
+        try:
+            fv = fs.get_feature_view(
+                name=config.FEATURE_VIEW_NAME,
+                version=config.FEATURE_VIEW_VERSION,
+            )
+            break
+        except Exception:
+            fv = None
+
+        if fv is None:
+            logger.info("Creating fresh Feature View from Feature Group ...")
+            fv = fs.get_or_create_feature_view(
+                name=config.FEATURE_VIEW_NAME,
+                version=config.FEATURE_VIEW_VERSION,
+                query=fg.select_all(),
+            )
+    return fv
 
 
 # ══════════════════════════════════════════════════════════════
@@ -451,31 +535,51 @@ def get_latest_features(city: str, n_rows: int = 48) -> pd.DataFrame:
 
     df = None
 
-    # Try Feature View first (with retry)
-    try:
-        fv = fs.get_feature_view(
-            name=config.FEATURE_VIEW_NAME,
-            version=config.FEATURE_VIEW_VERSION,
-        )
-        df = _retry(
-            lambda: fv.get_batch_data(),
-            label="latest-fv-batch",
-        )
-    except Exception as exc:
-        logger.warning(f"Feature View read failed ({exc}). Trying FG.read() ...")
-
-    # Fallback: direct Feature Group read
-    if df is None or len(df) == 0:
+    if _is_flight_disabled():
+        # Flight is off → try to load latest materialized training dataset
         try:
+            fv = _get_or_create_feature_view(fs, fg)
+            tds = fv.get_training_datasets()
+            tds = [td for td in tds if td.training_dataset_type != td.IN_MEMORY]
+            if tds:
+                latest_td = sorted(tds, key=lambda x: x.version, reverse=True)[0]
+                logger.info(f"Loading latest materialized training dataset version {latest_td.version} for inference ...")
+                result = fv.get_training_data(training_dataset_version=latest_td.version)
+                df = result[0] if isinstance(result, tuple) else result
+            if df is None:
+                raise ValueError("No materialized training datasets found.")
+        except Exception as exc:
+            raise RuntimeError(f"Could not fetch latest features via materialization: {exc}") from exc
+    else:
+        # Try Feature View first (uses Flight)
+        try:
+            fv = fs.get_feature_view(
+                name=config.FEATURE_VIEW_NAME,
+                version=config.FEATURE_VIEW_VERSION,
+            )
             df = _retry(
-                lambda: fg.read(),
-                label="latest-fg-read",
+                lambda: fv.get_batch_data(),
+                label="latest-fv-batch",
             )
         except Exception as exc:
-            raise RuntimeError(
-                f"Could not fetch latest features: {exc}"
-            ) from exc
+            logger.warning(f"Feature View read failed ({exc}). Trying materialization fallback ...")
 
+        # Fallback: materialized training dataset read
+        if df is None or len(df) == 0:
+            _disable_flight_client()
+            try:
+                fv = _get_or_create_feature_view(fs, fg)
+                tds = fv.get_training_datasets()
+                tds = [td for td in tds if td.training_dataset_type != td.IN_MEMORY]
+                if tds:
+                    latest_td = sorted(tds, key=lambda x: x.version, reverse=True)[0]
+                    logger.info(f"Loading materialized training dataset version {latest_td.version} for inference ...")
+                    result = fv.get_training_data(training_dataset_version=latest_td.version)
+                    df = result[0] if isinstance(result, tuple) else result
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Could not fetch latest features: {exc}"
+                ) from exc
     # Filter to city
     if "city" in df.columns:
         df = df[df["city"] == city]
@@ -495,6 +599,7 @@ def get_latest_features(city: str, n_rows: int = 48) -> pd.DataFrame:
 
 
 def save_model_to_registry(
+
     model: Any,
     scaler: Any,
     feature_names: list[str],

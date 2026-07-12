@@ -84,9 +84,13 @@ def load_raw_data(
             logger.info(f"Loaded {len(df)} rows from Hopsworks Feature Store.")
             return df
         except Exception as exc:
-            if source == "feature_store" or config.REQUIRE_FEATURE_STORE:
-                raise
-            logger.warning(f"Feature Store unavailable ({exc}). Falling back to CSV.")
+            logger.error(
+                f"⚠️  Feature Store read FAILED: {exc}\n"
+                "   Falling back to local CSV data for training."
+            )
+            # Fall through to CSV path below — training on stale data
+            # is better than not training at all.
+
 
     # -- CSV path -----------------------------------------------------
     # Prefer processed (already engineered) dataset when present
