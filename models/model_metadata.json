@@ -1,10 +1,10 @@
 {
   "model_name": "Deep Learning (MLP Neural Net)",
-  "mae": 21.31,
-  "rmse": 25.1988,
-  "r2": -2.1831,
-  "cv_rmse_mean": 29247.8825,
-  "cv_rmse_std": 41254.269,
+  "mae": 15.4627,
+  "rmse": 18.6918,
+  "r2": -1.1729,
+  "cv_rmse_mean": 24739.1677,
+  "cv_rmse_std": 34911.1079,
   "feature_count": 47,
   "feature_names": [
     "pm2_5",
@@ -55,7 +55,7 @@
     "aqi_ewm_72h",
     "timestamp_offset"
   ],
-  "trained_at": "2026-07-22T05:21:20.170581",
+  "trained_at": "2026-07-23T05:25:23.095726",
   "config": {
     "test_size": 0.2,
     "cv_folds": 5,
