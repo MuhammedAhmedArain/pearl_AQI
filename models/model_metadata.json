@@ -1,10 +1,10 @@
 {
-  "model_name": "Ridge Regression",
-  "mae": 16.1356,
-  "rmse": 19.64,
-  "r2": -3.6213,
-  "cv_rmse_mean": 38.1485,
-  "cv_rmse_std": 9.1273,
+  "model_name": "XGBoost",
+  "mae": 17.648,
+  "rmse": 21.9164,
+  "r2": -5.1339,
+  "cv_rmse_mean": 39.1846,
+  "cv_rmse_std": 3.0916,
   "feature_count": 47,
   "feature_names": [
     "pm2_5",
@@ -55,7 +55,7 @@
     "aqi_ewm_72h",
     "timestamp_offset"
   ],
-  "trained_at": "2026-07-26T05:32:41.180095",
+  "trained_at": "2026-07-27T05:49:40.767078",
   "config": {
     "test_size": 0.2,
     "cv_folds": 5,
