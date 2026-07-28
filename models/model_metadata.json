@@ -1,10 +1,10 @@
 {
-  "model_name": "XGBoost",
-  "mae": 17.648,
-  "rmse": 21.9164,
-  "r2": -5.1339,
-  "cv_rmse_mean": 39.1846,
-  "cv_rmse_std": 3.0916,
+  "model_name": "Gradient Boosting",
+  "mae": 20.6875,
+  "rmse": 26.1844,
+  "r2": -8.4715,
+  "cv_rmse_mean": 28.5652,
+  "cv_rmse_std": 3.7953,
   "feature_count": 47,
   "feature_names": [
     "pm2_5",
@@ -55,7 +55,7 @@
     "aqi_ewm_72h",
     "timestamp_offset"
   ],
-  "trained_at": "2026-07-27T05:49:40.767078",
+  "trained_at": "2026-07-28T05:14:33.655343",
   "config": {
     "test_size": 0.2,
     "cv_folds": 5,
