@@ -1,10 +1,10 @@
 {
-  "model_name": "Gradient Boosting",
-  "mae": 20.6875,
-  "rmse": 26.1844,
-  "r2": -8.4715,
-  "cv_rmse_mean": 28.5652,
-  "cv_rmse_std": 3.7953,
+  "model_name": "Linear Regression",
+  "mae": 8.5967,
+  "rmse": 10.6275,
+  "r2": -0.7172,
+  "cv_rmse_mean": 22.9859,
+  "cv_rmse_std": 2.7676,
   "feature_count": 47,
   "feature_names": [
     "pm2_5",
@@ -55,7 +55,7 @@
     "aqi_ewm_72h",
     "timestamp_offset"
   ],
-  "trained_at": "2026-07-28T05:14:33.655343",
+  "trained_at": "2026-07-29T05:22:05.482420",
   "config": {
     "test_size": 0.2,
     "cv_folds": 5,
