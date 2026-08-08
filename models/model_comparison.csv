@@ -1,7 +1,7 @@
 model_name,mae,rmse,r2,cv_rmse_mean,cv_rmse_std
 Ridge Regression,13.8728,16.8656,-3.7775,19.0126,2.0656
 Linear Regression,14.3639,17.641,-4.2268,18.8548,2.4222
-TensorFlow Neural Network,19.8716,22.8998,-7.8076,40.233,3.1387
+TensorFlow Neural Network,19.8716,22.8998,-7.8076,41.2584,2.8316
 Deep Learning (MLP Neural Net),20.6457,25.6593,-10.0582,31.4242,7.4639
 Gradient Boosting,23.4102,28.9809,-13.1064,22.3634,2.4698
 XGBoost,23.9945,29.311,-13.4296,23.9581,1.8922
