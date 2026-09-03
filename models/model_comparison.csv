@@ -1,8 +1,8 @@
 model_name,mae,rmse,r2,cv_rmse_mean,cv_rmse_std
-Ridge Regression,13.8728,16.8656,-3.7775,19.0126,2.0656
-Linear Regression,14.3639,17.641,-4.2268,18.8548,2.4222
-TensorFlow Neural Network,19.8716,22.8998,-7.8076,41.2729,2.9466
-Deep Learning (MLP Neural Net),20.6457,25.6593,-10.0582,31.4242,7.4639
-Gradient Boosting,23.4102,28.9809,-13.1064,22.3634,2.4698
-XGBoost,23.9945,29.311,-13.4296,23.9581,1.8922
-Random Forest,24.3725,29.8107,-13.9258,22.2764,2.6662
+Linear Regression,12.7779,15.5634,-3.1577,26.1473,6.1456
+Ridge Regression,14.14,17.1315,-4.0377,16.1606,3.4374
+Deep Learning (MLP Neural Net),16.7297,21.3492,-6.8236,33.3031,7.0027
+Gradient Boosting,23.0599,27.6069,-12.0822,20.8822,2.2116
+TensorFlow Neural Network,25.6853,27.9043,-12.3655,39.9522,7.6807
+Random Forest,27.5375,33.3393,-18.0791,20.9113,3.0797
+XGBoost,27.7271,33.5532,-18.3247,22.3527,2.2963
