@@ -1,10 +1,10 @@
 {
-  "model_name": "Linear Regression",
-  "mae": 6.4979,
-  "rmse": 7.7189,
-  "r2": -0.0362,
-  "cv_rmse_mean": 213.5508,
-  "cv_rmse_std": 193.875,
+  "model_name": "Ridge Regression",
+  "mae": 6.8472,
+  "rmse": 8.2067,
+  "r2": -0.2059,
+  "cv_rmse_mean": 15.1668,
+  "cv_rmse_std": 1.8708,
   "feature_count": 47,
   "feature_names": [
     "pm2_5",
@@ -55,7 +55,7 @@
     "aqi_ewm_72h",
     "timestamp_offset"
   ],
-  "trained_at": "2026-09-05T06:41:17.720417",
+  "trained_at": "2026-09-06T06:51:14.702562",
   "config": {
     "test_size": 0.2,
     "cv_folds": 5,
