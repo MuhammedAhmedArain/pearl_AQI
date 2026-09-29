@@ -55,7 +55,7 @@
     "aqi_ewm_72h",
     "timestamp_offset"
   ],
-  "trained_at": "2026-09-28T08:15:25.235265",
+  "trained_at": "2026-09-29T07:55:25.086013",
   "config": {
     "test_size": 0.2,
     "cv_folds": 5,
